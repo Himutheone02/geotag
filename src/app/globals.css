@@ -1,0 +1,1994 @@
+/* =====================================================================
+   Claymorphic theme
+   All design tokens live in :root below. Components only consume them.
+   Depth comes purely from layered box-shadows; motion from spring curves.
+   ===================================================================== */
+
+@font-face {
+  font-family: "Fredoka";
+  src: url("/fonts/Fredoka-Variable.woff2") format("woff2");
+  font-weight: 300 700;
+  font-stretch: 75% 125%;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+
+  /* ---------- Color: atlas pastels ---------- */
+  --bg-blush: #ffe4ee;
+  --bg-sea: #e3f1ff;
+  --bg-mint: #e8fbe9;
+  --bg-lilac: #efeaff;
+  --bg-gradient:
+    radial-gradient(ellipse 70% 55% at 8% 0%, var(--bg-blush) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 50% at 95% 12%, var(--bg-sea) 0%, transparent 70%),
+    radial-gradient(ellipse 80% 60% at 50% 105%, var(--bg-mint) 0%, transparent 70%),
+    linear-gradient(165deg, #f3efff 0%, var(--bg-lilac) 100%);
+
+  --clay-surface: #f5f2ff; /* cards */
+  --clay-surface-bright: #fbfaff; /* fields sitting on cards */
+  --clay-surface-sunk: #e6e0f5; /* a control pressed into the card (selected mode) */
+
+  --ink: #2d2a4a; /* 12.3:1 on surface */
+  --ink-soft: #5a5578; /* 6.3:1 on surface */
+
+  --accent: #a8c5ff; /* sea blue: primary button */
+  --accent-hover: #b6cfff;
+  --accent-ink: #1d2550; /* 8.4:1 on accent */
+  --focus-ring: #4b5fd6; /* 4.9:1 on surface */
+
+  --tone-ok: #1d6a46;
+  --tone-warn: #8a4a05;
+  --tone-error: #a3203d;
+
+  /* Continent fills for recognized-country chips (ink is 9.8:1 or better on all) */
+  --region-africa: #ffd9b8;
+  --region-americas: #c9efd5;
+  --region-asia: #fff0b5;
+  --region-europe: #d2daff;
+  --region-oceania: #c2eef0;
+
+  /* Vivid continent fills for countries named on the map */
+  --region-africa-vivid: #ff9a52;
+  --region-americas-vivid: #38c98a;
+  --region-asia-vivid: #ffc93a;
+  --region-europe-vivid: #7088ff;
+  --region-oceania-vivid: #26c2cf;
+
+  /* Empire themes: pastel for tiles and chips, vivid for the map */
+  --empire-roman: #e5d8ff;
+  --empire-roman-vivid: #9466ff;
+  --empire-mughal: #cdeedd;
+  --empire-mughal-vivid: #22a874;
+  --empire-ottoman: #ffd4dd;
+  --empire-ottoman-vivid: #ef4f73;
+  --empire-soviet: #ffdcc6;
+  --empire-soviet-vivid: #ff6f3c;
+  --empire-british: #d3e2ff;
+  --empire-british-vivid: #3f6fff;
+
+  /* Pathfinding: amber start, teal route, rose destination */
+  --route-start: #ffb547;
+  --route-start-soft: #ffe7bf;
+  --route-step: #2fb5a5;
+  --route-step-soft: #c9f0ea;
+  --route-end: #e8456b;
+  --route-end-soft: #ffd4dd;
+
+  /* Map */
+  --map-sea: #dce8fb;
+  --map-land: #ebe7f4; /* countries outside the round */
+  --map-land-edge: #f7f5fc;
+  --map-target: #fdfcff; /* blank: in the round, not yet named */
+  --map-target-edge: #b9b0d6;
+
+  /* Profile charts: one hue for magnitude (3.1:1 on the card surface) */
+  --chart-bar: #6d7fe8;
+
+  /* Daily Challenge: a warm card, distinct from the round tiles */
+  --daily-surface: #fff3dc;
+  --daily-ink: #7a4306; /* 7.3:1 on the daily surface */
+
+  /* Round result tags */
+  --tag-won: #d6f3e3;
+  --tag-lost: #ffd4dd;
+  --tag-best: #ffe7bf;
+
+  /* ---------- Depth: dual-shadow layering ----------
+     Every recipe has the same 4 layers, in the same order, so states
+     interpolate smoothly:
+       1. tight contact shadow        (outer)
+       2. soft drop shadow            (outer)
+       3. top-left inset              (light when raised, dark when pressed)
+       4. bottom-right inset          (dark when raised, light when pressed) */
+  --shadow-rgb: 94 82 158;
+
+  --clay-shadow-lg:
+    0 2px 4px rgb(var(--shadow-rgb) / 0.08),
+    16px 22px 44px rgb(var(--shadow-rgb) / 0.22),
+    inset 10px 12px 20px rgb(255 255 255 / 0.85),
+    inset -12px -14px 24px rgb(var(--shadow-rgb) / 0.16);
+
+  --clay-shadow-md:
+    0 2px 3px rgb(var(--shadow-rgb) / 0.08),
+    10px 14px 28px rgb(var(--shadow-rgb) / 0.22),
+    inset 6px 8px 14px rgb(255 255 255 / 0.85),
+    inset -8px -10px 16px rgb(var(--shadow-rgb) / 0.18);
+
+  --clay-shadow-lifted:
+    0 3px 5px rgb(var(--shadow-rgb) / 0.08),
+    14px 20px 36px rgb(var(--shadow-rgb) / 0.27),
+    inset 6px 8px 14px rgb(255 255 255 / 0.95),
+    inset -8px -10px 16px rgb(var(--shadow-rgb) / 0.18);
+
+  --clay-shadow-pressed:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.1),
+    3px 4px 10px rgb(var(--shadow-rgb) / 0.16),
+    inset 8px 10px 16px rgb(var(--shadow-rgb) / 0.22),
+    inset -6px -8px 14px rgb(255 255 255 / 0.7);
+
+  --clay-shadow-sm:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.08),
+    5px 7px 14px rgb(var(--shadow-rgb) / 0.2),
+    inset 3px 4px 7px rgb(255 255 255 / 0.8),
+    inset -4px -5px 8px rgb(var(--shadow-rgb) / 0.16);
+
+  /* ---------- Shape: large, organic radii ---------- */
+  --radius-organic: 46px 38px 44px 40px / 40px 46px 38px 44px; /* cards */
+  --radius-pillow: 30px; /* inputs, buttons */
+  --radius-pill: 999px; /* chips, counter */
+
+  /* ---------- Motion: damped springs ----------
+     Generated from a damped harmonic oscillator (zeta = damping ratio,
+     omega = natural frequency), sampled into CSS linear(). */
+  /* snappy: zeta 0.6, omega 22, peak 1.095 */
+  --spring-snappy: linear(0, 0.035, 0.126, 0.248, 0.387, 0.526, 0.657, 0.774, 0.872, 0.951, 1.01, 1.052, 1.078, 1.091, 1.095, 1.091, 1.082, 1.07, 1.057, 1.044, 1.031, 1.02, 1.011, 1.004, 0.999, 0.995, 0.992, 0.991, 0.991, 0.991, 0.992, 0.993, 0.995, 0.996, 0.997, 0.998, 1);
+  --spring-snappy-duration: 460ms;
+  /* bouncy: zeta 0.42, omega 16, peak 1.233 */
+  --spring-bouncy: linear(0, 0.08, 0.274, 0.52, 0.763, 0.969, 1.118, 1.204, 1.233, 1.219, 1.176, 1.119, 1.061, 1.012, 0.976, 0.954, 0.946, 0.948, 0.958, 0.971, 0.984, 0.996, 1.005, 1.01, 1.013, 1.012, 1.01, 1.007, 1.004, 1.001, 0.999, 0.998, 0.997, 0.997, 0.998, 0.998, 1);
+  --spring-bouncy-duration: 960ms;
+  /* gentle: zeta 0.75, omega 14, peak 1.028 */
+  --spring-gentle: linear(0, 0.022, 0.079, 0.158, 0.25, 0.347, 0.444, 0.536, 0.622, 0.699, 0.767, 0.826, 0.875, 0.915, 0.948, 0.973, 0.993, 1.007, 1.017, 1.023, 1.027, 1.028, 1.028, 1.027, 1.025, 1.022, 1.02, 1.017, 1.014, 1.012, 1.009, 1.007, 1.006, 1.004, 1.003, 1.002, 1);
+  --spring-gentle-duration: 570ms;
+
+  /* ---------- Type ---------- */
+  --font-clay: "Fredoka", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --step--1: 0.875rem; /* 14 */
+  --step-0: 1rem; /* 16 */
+  --step-1: 1.125rem; /* 18 */
+  --step-2: 1.3125rem; /* 21 */
+  --step-3: 1.5rem; /* 24 */
+  --step-display: clamp(2.25rem, 1.5rem + 3.2vw, 3.25rem); /* 36 -> 52 */
+
+  /* ---------- Space ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+}
+
+/* Browsers without linear(): closest single-overshoot approximations. */
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-snappy: cubic-bezier(0.34, 1.4, 0.64, 1);
+    --spring-bouncy: cubic-bezier(0.34, 1.7, 0.64, 1);
+    --spring-gentle: cubic-bezier(0.22, 1.15, 0.36, 1);
+  }
+}
+
+/* =====================================================================
+   Base
+   ===================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg-gradient);
+  background-color: var(--bg-lilac);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-clay);
+  font-size: var(--step-0);
+  line-height: 1.5;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* =====================================================================
+   Clay components (ClayCard, ClayInput, ClayButton)
+   ===================================================================== */
+
+.clay-card {
+  background: var(--clay-surface);
+  border-radius: var(--radius-organic);
+  box-shadow: var(--clay-shadow-lg);
+  padding: clamp(var(--space-5), 4vw, var(--space-6));
+}
+
+/* --- ClayInput --- */
+.clay-field {
+  position: relative; /* anchors the autocomplete list */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Autocomplete list: a clay card floating just below the field. */
+.clay-suggest {
+  position: absolute;
+  top: calc(100% + var(--space-3));
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: 30px 26px 30px 28px / 28px 30px 26px 30px;
+  box-shadow: var(--clay-shadow-lifted);
+  transform-origin: 50% 0;
+  animation: clay-drop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+/* Kept on screen for 240ms after closing (SUGGEST_EXIT_MS in ClayInput.tsx). */
+.clay-suggest--closing {
+  pointer-events: none;
+  animation: clay-drop-out 240ms var(--spring-snappy) both;
+}
+
+.clay-suggest__option {
+  position: relative;
+  isolation: isolate; /* keeps the highlight layer behind this option's text */
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 22px;
+  color: var(--ink);
+  font-size: var(--step-1);
+  font-weight: 500;
+  line-height: 1.6;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+/* Hover and keyboard highlights are a raised clay layer that fades in:
+   opacity and transform only, so moving through the list never repaints shadows. */
+.clay-suggest__option::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--clay-surface-bright);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.clay-suggest__option::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  opacity: 0;
+  transition: opacity var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+.clay-suggest__option:hover::before {
+  opacity: 1;
+}
+
+/* Keyboard highlight: the option rises out of the list. */
+.clay-suggest__option[aria-selected="true"] {
+  transform: translateY(-1px);
+}
+
+.clay-suggest__option[aria-selected="true"]::after {
+  opacity: 1;
+}
+
+.clay-suggest__detail {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  font-weight: 400;
+}
+
+.clay-field__label {
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink-soft);
+  padding-left: var(--space-4);
+}
+
+.clay-input {
+  width: 100%;
+  min-height: 64px;
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pillow);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-md);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--step-2);
+  font-weight: 500;
+  transition:
+    transform var(--spring-snappy-duration) var(--spring-snappy),
+    box-shadow var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+.clay-input::placeholder {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.clay-input:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+  transform: translateY(-2px);
+  box-shadow: var(--clay-shadow-lifted);
+}
+
+/* --- ClayButton --- */
+.clay-button {
+  min-height: 64px;
+  padding: 0 var(--space-6);
+  border: 0;
+  border-radius: var(--radius-pillow);
+  box-shadow: var(--clay-shadow-md);
+  font: inherit;
+  font-size: var(--step-1);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--spring-snappy-duration) var(--spring-snappy),
+    box-shadow var(--spring-snappy-duration) var(--spring-snappy),
+    background-color 200ms ease-out;
+}
+
+.clay-button--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.clay-button--soft {
+  background: var(--clay-surface-bright);
+  color: var(--ink);
+}
+
+.clay-button:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--clay-shadow-lifted);
+}
+
+.clay-button--primary:hover {
+  background: var(--accent-hover);
+}
+
+.clay-button:active {
+  transform: translateY(2px) scale(0.97);
+  box-shadow: var(--clay-shadow-pressed);
+}
+
+.clay-button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.clay-button--sm {
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  font-size: var(--step-0);
+}
+
+.clay-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: var(--clay-shadow-md);
+}
+
+/* =====================================================================
+   Game layout
+   ===================================================================== */
+
+.game {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(var(--space-6), 7vw, 72px) var(--space-4) var(--space-7);
+  display: grid;
+  gap: var(--space-6);
+}
+
+.game-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/* --- Brand --- */
+.game-heading {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* In a round: a small clay badge with the brand's clay dot, above the round's title. */
+.brand {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface);
+  box-shadow: var(--clay-shadow-sm);
+  color: var(--ink);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.brand::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #e6eeff, var(--accent));
+  box-shadow:
+    inset 2px 2px 3px rgb(255 255 255 / 0.8),
+    inset -2px -3px 4px rgb(var(--shadow-rgb) / 0.25);
+}
+
+.game-tagline {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step-2);
+  font-weight: 500;
+}
+
+.game-title {
+  margin: 0;
+  font-size: var(--step-display);
+  font-weight: 650;
+  font-stretch: 112%;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.counter,
+.timer {
+  margin: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface);
+  box-shadow: var(--clay-shadow-md);
+  white-space: nowrap;
+}
+
+.counter-value {
+  display: inline-block;
+  font-size: var(--step-3);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Replayed on each new country (the element is re-keyed by the count). */
+.counter-value--bump {
+  animation: clay-bump var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.counter-total {
+  font-size: var(--step-1);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.timer {
+  font-size: var(--step-3);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Shared card text --- */
+.card-title {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 600;
+}
+
+.card-lead {
+  margin: var(--space-2) 0 0;
+  color: var(--ink-soft);
+}
+
+.clay-card > .raw-list,
+.clay-card > .empty {
+  margin-top: var(--space-4);
+}
+
+/* --- Setup card --- */
+.continent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.continent-button {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border-radius: 34px 28px 32px 30px / 30px 34px 28px 32px;
+  text-align: left;
+}
+
+.clay-button--soft[data-region],
+.clay-button--soft[data-theme] {
+  background: var(--chip-bg);
+}
+
+/* --- Mode switch (Continents / Empires / World) --- */
+.mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+/* The selected mode sits pressed into the card. */
+.mode-option[aria-pressed="true"] {
+  background: var(--clay-surface-sunk);
+  box-shadow: var(--clay-shadow-pressed);
+  transform: translateY(1px);
+}
+
+.mode-option[aria-pressed="true"]:hover {
+  box-shadow: var(--clay-shadow-pressed);
+  transform: translateY(1px);
+}
+
+/* The profile tab isn't a game mode: a little extra space sets it apart. */
+.mode-option--profile {
+  margin-left: var(--space-2);
+}
+
+/* --- Profile & stats --- */
+.profile {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.profile > .card-title,
+.profile > .card-lead {
+  margin-bottom: 0;
+}
+
+.profile > .card-lead {
+  margin-top: calc(-1 * var(--space-4));
+}
+
+.profile-filter {
+  margin-bottom: 0;
+}
+
+.profile-filter__count {
+  margin-left: var(--space-1);
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column-reverse; /* value reads first visually; the label stays first for screen readers */
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border-radius: 28px 24px 30px 26px / 26px 30px 24px 28px;
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-md);
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.stat-tile dt {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  font-weight: 500;
+}
+
+.stat-tile dd {
+  margin: 0;
+  font-size: var(--step-3);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile__aside {
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+  font-weight: 500;
+}
+
+.profile-section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.profile-subtitle {
+  margin: 0;
+  font-size: var(--step-1);
+  font-weight: 600;
+}
+
+/* Average winning time: one bar per mode, sunk track, raised clay fill. */
+.mode-bars {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mode-bar {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr 4.5rem;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+}
+
+.mode-bar__label {
+  font-weight: 600;
+}
+
+.mode-bar__track {
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-sunk);
+  box-shadow: inset 3px 4px 8px rgb(var(--shadow-rgb) / 0.22), inset -3px -3px 6px rgb(255 255 255 / 0.7);
+  padding: 3px;
+}
+
+.mode-bar__fill {
+  display: block;
+  width: var(--fill);
+  height: 100%;
+  border-radius: 4px 999px 999px 4px; /* square-ish at the baseline, round at the data end */
+  background: var(--chart-bar);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.12),
+    2px 3px 6px rgb(var(--shadow-rgb) / 0.22),
+    inset 2px 3px 4px rgb(255 255 255 / 0.45),
+    inset -2px -3px 4px rgb(var(--shadow-rgb) / 0.3);
+  transform-origin: left center;
+  animation: clay-bar-grow var(--spring-gentle-duration) var(--spring-gentle) both;
+}
+
+.mode-bar__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mode-bar__note {
+  grid-column: 2 / 4;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+.profile-subtitle__aside {
+  margin-left: var(--space-2);
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  font-weight: 500;
+}
+
+.profile-note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* --- Recall heatmap --- */
+.heatmap {
+  padding: var(--space-2);
+  border-radius: var(--radius-pillow);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+}
+
+.heatmap-switch {
+  margin-bottom: 0;
+}
+
+.heat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step--1);
+}
+
+.heat-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heat-legend__count {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.heat-swatch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  box-shadow:
+    inset 1px 1px 2px rgb(255 255 255 / 0.45),
+    inset -1px -2px 2px rgb(0 0 0 / 0.18);
+}
+
+.heat-swatch--blank {
+  background: var(--map-target);
+  box-shadow: inset 0 0 0 1.5px var(--map-target-edge);
+}
+
+.heat-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4) var(--space-5);
+}
+
+.heat-lists__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--step-0);
+  font-weight: 600;
+}
+
+.heat-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.heat-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heat-list__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.heat-list__value {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Passport stamps ---
+   Earned: a thick plastic token, raised on a drop shadow, its face pressed in and its
+   lettering embossed. Not yet: the deep, empty impression the token will sit in.
+   Depth is all box-shadow and text-shadow; only transform and opacity ever animate. */
+.stamps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5) var(--space-4);
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  list-style: none;
+}
+
+.stamp-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+.stamp-slot[data-stamp="roman-emperor"] {
+  --stamp-rim: #8a5cf5;
+  --stamp-light: #cdb8ff;
+  --stamp-face: #e8dcff;
+  --stamp-ink: #4b2aa8; /* 7.3:1 on the face */
+}
+
+.stamp-slot[data-stamp="speedrunner"] {
+  --stamp-rim: #24a594;
+  --stamp-light: #92e3d8;
+  --stamp-face: #cdf2ec;
+  --stamp-ink: #0f5c53; /* 6.5:1 on the face */
+}
+
+.stamp-slot[data-stamp="world-traveler"] {
+  --stamp-rim: #3f6fff;
+  --stamp-light: #a7bdff;
+  --stamp-face: #d8e4ff;
+  --stamp-ink: #1f3a99; /* 7.8:1 on the face */
+}
+
+.stamp {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--clay-surface-sunk);
+  /* A deep hole: heavy shade under the top-left lip, light caught on the bottom-right
+     wall, and a bright edge where the card's surface breaks. */
+  box-shadow:
+    inset 14px 18px 26px rgb(var(--shadow-rgb) / 0.55),
+    inset 4px 5px 6px rgb(var(--shadow-rgb) / 0.3),
+    inset -10px -12px 18px rgb(255 255 255 / 0.95),
+    0 0 0 3px var(--clay-surface),
+    -2px -2px 3px 3px rgb(var(--shadow-rgb) / 0.08),
+    2px 3px 3px 3px rgb(255 255 255 / 0.95);
+}
+
+.stamp__face {
+  display: grid;
+  place-items: center;
+  width: 74%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow:
+    inset -3px -4px 6px rgb(255 255 255 / 0.65),
+    inset 3px 4px 7px rgb(var(--shadow-rgb) / 0.2);
+}
+
+/* Debossed lettering: a light edge below-right, a dark edge above-left. */
+.stamp__mark {
+  color: rgb(var(--shadow-rgb) / 0.26);
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.04em;
+  text-shadow:
+    1px 1px 0 rgb(255 255 255 / 0.85),
+    -1px -1px 0 rgb(var(--shadow-rgb) / 0.2);
+}
+
+.stamp-slot[data-stamp="roman-emperor"] .stamp__mark {
+  font-size: 1.05rem;
+}
+
+.stamp-slot--earned .stamp {
+  background: radial-gradient(circle at 32% 28%, var(--stamp-light), var(--stamp-rim) 72%);
+  box-shadow:
+    0 2px 3px rgb(var(--shadow-rgb) / 0.22),
+    10px 14px 24px rgb(var(--shadow-rgb) / 0.34),
+    inset 6px 8px 12px rgb(255 255 255 / 0.55),
+    inset -8px -10px 16px rgb(0 0 0 / 0.24);
+  animation: clay-stamp-press var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.stamp-slot--earned .stamp__face {
+  background: var(--stamp-face);
+  box-shadow:
+    inset 6px 8px 12px rgb(0 0 0 / 0.26),
+    inset -5px -6px 10px rgb(255 255 255 / 0.7),
+    0 0 0 3px rgb(255 255 255 / 0.22);
+}
+
+/* Embossed lettering on the token's face: lit from the top left. */
+.stamp-slot--earned .stamp__mark {
+  color: var(--stamp-ink);
+  text-shadow:
+    -1px -1px 0 rgb(255 255 255 / 0.75),
+    1px 2px 1px rgb(0 0 0 / 0.25);
+}
+
+.stamp-name {
+  font-weight: 600;
+}
+
+.stamp-status {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  line-height: 1.4;
+}
+
+.best-chip {
+  min-width: 128px;
+}
+
+.best-chip__time {
+  font-size: var(--step-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recent rounds */
+.history {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-radius: 26px 22px 26px 24px / 24px 26px 22px 26px;
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  animation: clay-fade-in 200ms ease-out both;
+}
+
+.history-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history-row__label {
+  font-weight: 600;
+}
+
+.history-row__meta,
+.history-row__date,
+.history-more {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+.history-more {
+  margin: 0;
+}
+
+.history-row__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.history-row__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.history-row__time {
+  font-size: var(--step-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-sunk);
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.tag--won {
+  background: var(--tag-won);
+  color: var(--tone-ok);
+}
+
+.tag--lost {
+  background: var(--tag-lost);
+  color: var(--tone-error);
+}
+
+.tag--daily {
+  background: var(--daily-surface);
+  color: var(--daily-ink);
+}
+
+.tag--best {
+  background: var(--tag-best);
+  color: var(--tone-warn);
+}
+
+.profile-clear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.profile-clear__question {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--tone-error);
+  font-weight: 500;
+}
+
+.continent-name {
+  font-size: var(--step-2);
+  font-weight: 600;
+}
+
+.continent-count {
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+/* --- Answer card --- */
+.entry {
+  display: flex;
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.entry .clay-field {
+  flex: 1;
+}
+
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.suggest-toggle__state {
+  display: inline-block;
+  min-width: 2.2em;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  font-size: var(--step--1);
+}
+
+.suggest-toggle[aria-pressed="true"] .suggest-toggle__state {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.answer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.feedback-region {
+  flex: 1 1 240px;
+  min-height: 1.5em;
+  padding-left: var(--space-4);
+}
+
+.feedback {
+  margin: 0;
+  font-size: var(--step-0);
+  font-weight: 500;
+}
+
+.feedback--ok {
+  color: var(--tone-ok);
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+  transform-origin: left center;
+}
+
+.feedback--warn,
+.feedback--error {
+  animation: clay-nudge var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.feedback--warn {
+  color: var(--tone-warn);
+}
+
+.feedback--error {
+  color: var(--tone-error);
+}
+
+.feedback--hint {
+  color: var(--ink-soft);
+  animation: clay-fade-in 160ms ease-out both;
+}
+
+/* Replayed on every accepted answer: data-press alternates "a"/"b", and a
+   changed animation-name restarts the animation without remounting the input. */
+.clay-input[data-press="a"] {
+  animation: clay-press-a var(--spring-bouncy-duration) var(--spring-bouncy);
+}
+
+.clay-input[data-press="b"] {
+  animation: clay-press-b var(--spring-bouncy-duration) var(--spring-bouncy);
+}
+
+/* --- Result card --- */
+.result-title:focus {
+  outline: none; /* focused programmatically when the round ends; not interactive */
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+/* --- Share result --- */
+.share {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+/* The text as it will be pasted, in a well pressed into the card. */
+.share-preview {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: 24px 20px 26px 22px / 22px 26px 20px 24px;
+  background: var(--clay-surface-sunk);
+  box-shadow: var(--clay-shadow-pressed);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--step-0);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.share-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.share-status {
+  min-height: 1.5em;
+  margin: 0;
+}
+
+.share-toast {
+  display: inline-block;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--tag-won);
+  box-shadow: var(--clay-shadow-sm);
+  color: var(--tone-ok);
+  font-weight: 600;
+  transform-origin: left center;
+  animation: clay-pop-in var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.share-toast--failed {
+  background: var(--tag-lost);
+  color: var(--tone-error);
+}
+
+/* --- Daily Challenge --- */
+.daily-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-5);
+  background: var(--daily-surface);
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.daily-card__text {
+  flex: 1 1 280px;
+}
+
+.daily-card__text > .card-title {
+  margin-top: 0;
+}
+
+.daily-card__date {
+  margin: 0 0 var(--space-1);
+  color: var(--daily-ink);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.daily-card__done {
+  margin: var(--space-2) 0 0;
+  color: var(--daily-ink);
+  font-weight: 600;
+}
+
+.daily-card__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.daily-card__actions .share {
+  margin-top: 0;
+}
+
+.daily-badge {
+  display: inline-block;
+  margin-left: var(--space-3);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--daily-surface);
+  box-shadow: var(--clay-shadow-sm);
+  color: var(--daily-ink);
+  font-size: var(--step--1);
+  font-weight: 600;
+  font-stretch: 100%;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+/* --- Challenge links (?route=) --- */
+/* layout.tsx marks <html> while a challenge link is being read: hide the setup screen meanwhile. */
+.challenge-pending {
+  display: none;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step-1);
+  font-weight: 500;
+}
+
+html[data-challenge="pending"] .challenge-pending {
+  display: block;
+  animation: clay-fade-in 200ms ease-out both;
+}
+
+html[data-challenge="pending"] .setup-only {
+  display: none;
+}
+
+.notice-card {
+  background: var(--tag-lost);
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.notice-card .card-title {
+  margin-top: 0;
+}
+
+.notice-card .card-lead {
+  margin-bottom: var(--space-4);
+}
+
+/* --- Countries / Capitals modifier --- */
+.answer-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.answer-switch__label {
+  margin-right: var(--space-1);
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+/* --- Named-countries card --- */
+.empty {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.raw-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg, var(--clay-surface-bright));
+  box-shadow: var(--clay-shadow-sm);
+  line-height: 1.2;
+  animation:
+    clay-pop-in var(--spring-bouncy-duration) var(--spring-bouncy) both,
+    clay-fade-in 180ms ease-out both;
+}
+
+.chip-name {
+  font-weight: 600;
+}
+
+.chip-code {
+  margin-left: var(--space-2);
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.chip-typed {
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+}
+
+/* Shown after a forfeit: neutral clay with a continent dot, no entrance motion. */
+.chip--missed {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--clay-surface-bright);
+  animation: none;
+}
+
+.chip--missed::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chip-bg);
+  box-shadow:
+    inset 1px 1px 2px rgb(255 255 255 / 0.8),
+    inset -1px -1px 2px rgb(var(--shadow-rgb) / 0.25);
+}
+
+[data-region="Africa"] {
+  --chip-bg: var(--region-africa);
+  --vivid: var(--region-africa-vivid);
+}
+[data-region="Americas"] {
+  --chip-bg: var(--region-americas);
+  --vivid: var(--region-americas-vivid);
+}
+[data-region="Asia"] {
+  --chip-bg: var(--region-asia);
+  --vivid: var(--region-asia-vivid);
+}
+[data-region="Europe"] {
+  --chip-bg: var(--region-europe);
+  --vivid: var(--region-europe-vivid);
+}
+[data-region="Oceania"] {
+  --chip-bg: var(--region-oceania);
+  --vivid: var(--region-oceania-vivid);
+}
+
+/* Round themes: a continent or empire round colors its chips and map as one. */
+[data-theme="Africa"] {
+  --chip-bg: var(--region-africa);
+  --vivid: var(--region-africa-vivid);
+}
+[data-theme="Americas"] {
+  --chip-bg: var(--region-americas);
+  --vivid: var(--region-americas-vivid);
+}
+[data-theme="Asia"] {
+  --chip-bg: var(--region-asia);
+  --vivid: var(--region-asia-vivid);
+}
+[data-theme="Europe"] {
+  --chip-bg: var(--region-europe);
+  --vivid: var(--region-europe-vivid);
+}
+[data-theme="Oceania"] {
+  --chip-bg: var(--region-oceania);
+  --vivid: var(--region-oceania-vivid);
+}
+[data-theme="Roman"] {
+  --chip-bg: var(--empire-roman);
+  --vivid: var(--empire-roman-vivid);
+}
+[data-theme="Mughal"] {
+  --chip-bg: var(--empire-mughal);
+  --vivid: var(--empire-mughal-vivid);
+}
+[data-theme="Ottoman"] {
+  --chip-bg: var(--empire-ottoman);
+  --vivid: var(--empire-ottoman-vivid);
+}
+[data-theme="Soviet"] {
+  --chip-bg: var(--empire-soviet);
+  --vivid: var(--empire-soviet-vivid);
+}
+[data-theme="British"] {
+  --chip-bg: var(--empire-british);
+  --vivid: var(--empire-british-vivid);
+}
+[data-theme="Pathfinding"] {
+  --chip-bg: var(--route-step-soft);
+  --vivid: var(--route-step);
+}
+
+/* --- Pathfinding --- */
+.route-prompt {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-4);
+  font-size: var(--step-1);
+}
+
+.route-prompt strong {
+  font-weight: 650;
+}
+
+.chip--start {
+  background: var(--route-start-soft);
+}
+
+.chip--end {
+  background: var(--route-end-soft);
+  animation: none;
+}
+
+.chip--end-reached {
+  animation: clay-pop-in var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.map-endpoint path,
+.map-endpoint circle {
+  stroke: var(--ink);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.map-endpoint--start path,
+.map-endpoint--start circle {
+  fill: var(--route-start);
+}
+
+/* The destination breathes until the route reaches it. */
+.map-endpoint--end path,
+.map-endpoint--end circle {
+  fill: var(--route-end);
+  animation: map-breathe-solid var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
+}
+
+.map-endpoint--reached path,
+.map-endpoint--reached circle {
+  animation: none;
+  fill-opacity: 1;
+}
+
+.map-label {
+  font-family: var(--font-clay);
+  font-size: 20px; /* SVG units: about 17px on a 700px-wide map */
+  font-weight: 650;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* --- Hints --- */
+.hint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.hint-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding-left: 1.4em;
+}
+
+.hint {
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
+  transform-origin: left center;
+}
+
+.hint-found {
+  color: var(--tone-ok);
+  font-weight: 500;
+}
+
+.initials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.initial {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+/* --- Map --- */
+.map-card {
+  padding: clamp(var(--space-3), 2.5vw, var(--space-5));
+}
+
+/* The sea is a pressed-in clay well; land sits raised on it. */
+.world-map,
+.map-placeholder {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-pillow);
+  background: var(--map-sea);
+  box-shadow:
+    inset 6px 8px 16px rgb(var(--shadow-rgb) / 0.18),
+    inset -6px -8px 14px rgb(255 255 255 / 0.8);
+}
+
+.world-map {
+  height: auto;
+  max-height: 72vh;
+}
+
+.map-placeholder {
+  aspect-ratio: 4 / 3;
+}
+
+.map-country {
+  fill: var(--map-land);
+  stroke: var(--map-land-edge);
+  stroke-width: 0.6;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.map-country--target {
+  fill: var(--map-target);
+  stroke: var(--map-target-edge);
+  stroke-width: 0.8;
+}
+
+.map-named {
+  fill: var(--vivid);
+  stroke: var(--map-land-edge);
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Just named: pops in (transform-origin is set inline to its largest landmass), then settles onto the clay layer. */
+.map-named--popping {
+  animation:
+    map-pop var(--spring-bouncy-duration) var(--spring-bouncy) both,
+    clay-fade-in 180ms ease-out both;
+}
+
+.map-marker {
+  fill: var(--map-target);
+  stroke: var(--map-target-edge);
+  stroke-width: 1.2;
+}
+
+.map-marker--named {
+  fill: var(--vivid);
+  stroke: #ffffff;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    map-pop var(--spring-bouncy-duration) var(--spring-bouncy) both,
+    clay-fade-in 180ms ease-out both;
+}
+
+/* Heatmap fills: colored inline, already settled (no pop). */
+.map-named--fill {
+  stroke: #ffffff;
+}
+
+.map-marker--fill {
+  stroke: #ffffff;
+  stroke-width: 1.2;
+}
+
+/* Hint stage 2: the missing country breathes on a spring until it's named. */
+.map-hint-shape {
+  fill: var(--focus-ring);
+  stroke: var(--focus-ring);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  animation: map-breathe var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
+}
+
+.map-hint-ring {
+  fill: none;
+  stroke: var(--focus-ring);
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-ring var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
+}
+
+.source-note {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+}
+
+/* =====================================================================
+   Spring keyframes
+   Two keyframes each, so the spring curve drives the whole motion
+   (a spring easing on a multi-stop animation would restart per segment).
+   ===================================================================== */
+
+@keyframes clay-pop-in {
+  from {
+    transform: scale(0.55);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes clay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes clay-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Autocomplete list: drops out of the field on a spring, and tucks back up when it closes. */
+@keyframes clay-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes clay-drop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+}
+
+/* A stamp is pressed onto the page: dropped from above, slightly turned, then springs flat. */
+@keyframes clay-stamp-press {
+  from {
+    opacity: 0;
+    transform: scale(1.35) rotate(-10deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Bars grow from the baseline; the spring overshoots, then settles on the value.
+   Transform, not width, so it stays on the compositor. */
+@keyframes clay-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Displaced, then released: the spring's overshoot produces the wobble. */
+@keyframes clay-nudge {
+  from {
+    transform: translateX(-14px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Snap down into the card, then spring back up past rest: a mechanical key press. */
+@keyframes clay-press-a {
+  from {
+    transform: translateY(6px) scale(0.97);
+    box-shadow: var(--clay-shadow-pressed);
+  }
+  to {
+    transform: translateY(-2px);
+    box-shadow: var(--clay-shadow-lifted);
+  }
+}
+
+@keyframes clay-press-b {
+  from {
+    transform: translateY(6px) scale(0.97);
+    box-shadow: var(--clay-shadow-pressed);
+  }
+  to {
+    transform: translateY(-2px);
+    box-shadow: var(--clay-shadow-lifted);
+  }
+}
+
+@keyframes map-pop {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes map-breathe {
+  from {
+    fill-opacity: 0.12;
+    stroke-opacity: 0.5;
+  }
+  to {
+    fill-opacity: 0.45;
+    stroke-opacity: 1;
+  }
+}
+
+@keyframes map-breathe-solid {
+  from {
+    fill-opacity: 0.45;
+  }
+  to {
+    fill-opacity: 1;
+  }
+}
+
+@keyframes map-ring {
+  from {
+    transform: scale(0.75);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+@keyframes clay-bump {
+  from {
+    transform: scale(1.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* =====================================================================
+   Small screens and reduced motion
+   ===================================================================== */
+
+@media (max-width: 480px) {
+  .entry {
+    flex-direction: column;
+  }
+
+  .mode-option--profile {
+    margin-left: 0;
+  }
+
+  .answer-switch__label {
+    flex-basis: 100%;
+  }
+
+  .stamps {
+    gap: var(--space-4) var(--space-2);
+  }
+
+  .stamp {
+    width: 88px;
+  }
+
+  .stamp__mark {
+    font-size: 1.1rem;
+  }
+
+  .stamp-slot[data-stamp="roman-emperor"] .stamp__mark {
+    font-size: 0.85rem;
+  }
+
+  .stat-tiles {
+    gap: var(--space-3);
+  }
+
+  .stat-tile {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .stat-tile dd {
+    font-size: var(--step-2);
+  }
+
+  .stat-tile__aside {
+    display: block;
+    font-size: var(--step--1);
+  }
+
+  .history-row {
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .history-row__side {
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .mode-bar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .mode-bar__track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .mode-bar__note {
+    grid-column: 1 / -1;
+  }
+
+  .entry .clay-button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .feedback--ok,
+  .feedback--warn,
+  .feedback--error,
+  .counter-value--bump {
+    animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .clay-input[data-press] {
+    animation: none;
+  }
+
+  .clay-suggest,
+  .stat-tile,
+  .share-toast,
+  .daily-card,
+  .notice-card,
+  .stamp-slot--earned .stamp {
+    animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .clay-suggest--closing {
+    animation: clay-fade-out 120ms ease-out both;
+  }
+
+  .clay-suggest__option[aria-selected="true"] {
+    transform: none;
+  }
+
+  .mode-bar__fill {
+    animation: none;
+  }
+
+  .hint,
+  .map-named--popping,
+  .map-marker--named {
+    animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .map-hint-shape,
+  .map-hint-ring {
+    animation: none;
+    fill-opacity: 0.35;
+  }
+
+  .map-endpoint--end path,
+  .map-endpoint--end circle,
+  .chip--end-reached {
+    animation: none;
+  }
+
+  .clay-input,
+  .clay-button {
+    transition:
+      box-shadow 120ms ease-out,
+      background-color 120ms ease-out;
+  }
+
+  .clay-input:focus,
+  .clay-button:hover,
+  .clay-button:active {
+    transform: none;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

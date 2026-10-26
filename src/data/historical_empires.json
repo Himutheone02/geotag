@@ -1,0 +1,17 @@
+{
+  "Roman_Empire": [
+    "Italy", "Vatican City", "San Marino", "Malta", "Spain", "Portugal", "Andorra", "France", "Monaco", "United Kingdom", "Belgium", "Luxembourg", "Netherlands", "Germany", "Switzerland", "Liechtenstein", "Austria", "Hungary", "Slovakia", "Slovenia", "Croatia", "Bosnia and Herzegovina", "Serbia", "Montenegro", "Kosovo", "Albania", "North Macedonia", "Greece", "Bulgaria", "Romania", "Moldova", "Turkey", "Cyprus", "Syria", "Lebanon", "Israel", "Palestine", "Jordan", "Iraq", "Egypt", "Libya", "Tunisia", "Algeria", "Morocco"
+  ],
+  "Mughal_Empire": [
+    "India", "Pakistan", "Bangladesh", "Afghanistan"
+  ],
+  "Ottoman_Empire": [
+    "Turkey", "Greece", "Bulgaria", "North Macedonia", "Albania", "Kosovo", "Serbia", "Bosnia and Herzegovina", "Montenegro", "Romania", "Hungary", "Moldova", "Ukraine", "Russia", "Georgia", "Armenia", "Azerbaijan", "Syria", "Lebanon", "Israel", "Palestine", "Jordan", "Iraq", "Kuwait", "Saudi Arabia", "Yemen", "Oman", "United Arab Emirates", "Qatar", "Bahrain", "Egypt", "Libya", "Tunisia", "Algeria", "Cyprus", "Eritrea", "Djibouti", "Somalia", "Sudan"
+  ],
+  "Soviet_Union": [
+    "Russia", "Ukraine", "Belarus", "Moldova", "Georgia", "Armenia", "Azerbaijan", "Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan", "Estonia", "Latvia", "Lithuania"
+  ],
+  "British_Empire": [
+    "United Kingdom", "Ireland", "Canada", "Australia", "New Zealand", "India", "Pakistan", "Bangladesh", "Sri Lanka", "Maldives", "Malaysia", "Singapore", "Brunei", "Myanmar", "Cyprus", "Malta", "South Africa", "Namibia", "Botswana", "Zimbabwe", "Zambia", "Malawi", "Lesotho", "Eswatini", "Tanzania", "Kenya", "Uganda", "Nigeria", "Ghana", "Sierra Leone", "The Gambia", "Sudan", "South Sudan", "Egypt", "Somalia", "Cameroon", "Guyana", "Belize", "Jamaica", "Trinidad and Tobago", "Bahamas", "Barbados", "Saint Lucia", "Saint Vincent and the Grenadines", "Grenada", "Antigua and Barbuda", "Saint Kitts and Nevis", "Dominica", "Vanuatu", "Fiji", "Solomon Islands", "Papua New Guinea", "Tuvalu", "Kiribati", "Tonga", "Samoa", "Kuwait", "Bahrain", "Qatar", "United Arab Emirates", "Oman", "Yemen", "Jordan", "Israel", "Palestine", "Iraq"
+  ]
+}
