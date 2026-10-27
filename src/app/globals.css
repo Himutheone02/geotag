@@ -420,9 +420,15 @@ body {
 .game {
   max-width: 760px;
   margin: 0 auto;
-  padding: clamp(var(--space-6), 7vw, 72px) var(--space-4) var(--space-7);
+  /* A little extra room on top for the logo. */
+  padding: clamp(40px, 8vw, 88px) var(--space-4) var(--space-7);
   display: grid;
   gap: var(--space-6);
+}
+
+/* Wraps the game so it can be made inert under the splash; adds no box of its own. */
+.game-shell {
+  display: contents;
 }
 
 .game-header {
@@ -434,38 +440,275 @@ body {
 }
 
 /* --- Brand --- */
+/* The transparent logo, floating on the page background: 48px tall, 56px from 768px up
+   (Tailwind's h-12 md:h-14 w-auto object-contain drop-shadow-md, written in CSS).
+   The one shadow here that isn't a box-shadow, on purpose: a box-shadow would draw the
+   image's rectangle; a drop-shadow follows the logo's own outline. Tinted like every
+   other shadow on the page. Static, never animated. */
+.brand-logo {
+  display: block;
+  justify-self: start;
+  height: 48px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
+  filter: drop-shadow(0 3px 3px rgb(var(--shadow-rgb) / 0.12));
+}
+
+@media (min-width: 768px) {
+  .brand-logo {
+    height: 56px;
+  }
+}
+
+.brand-title:focus {
+  outline: none; /* focused programmatically after the splash; not interactive */
+}
+
+/* --- Boot-up splash ---
+   Covers the game from the first paint (it's in the server HTML). Everything that
+   moves here moves transform or opacity only. */
+html:has(.splash:not(.splash--leaving)) {
+  overflow: hidden; /* the page behind doesn't scroll while the splash is up */
+}
+
+html[data-skip-splash] .splash {
+  display: none; /* challenge links go straight in */
+}
+
+.splash {
+  --splash-peach: #ffd8c6;
+  --splash-lavender: #ddd4ff;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5) var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 10%, #ffe9dd 0%, transparent 70%),
+    radial-gradient(ellipse 70% 60% at 90% 90%, #e9e2ff 0%, transparent 70%),
+    linear-gradient(160deg, var(--splash-peach) 0%, #f4dcf0 50%, var(--splash-lavender) 100%);
+  transition: opacity var(--splash-exit, 500ms) ease;
+}
+
+/* The exit: the card scales up as the whole splash fades, revealing the game. */
+.splash--leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash__card {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+  width: min(440px, 100%);
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  border-radius: var(--radius-organic);
+  background: rgb(255 255 255 / 0.5);
+  box-shadow: var(--clay-shadow-lg);
+  text-align: center;
+  transition: transform var(--splash-exit, 500ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.splash--leaving .splash__card {
+  transform: scale(1.05);
+}
+
+/* Wider than tall so the signature (globe + wordmark) fits on one line; the intro media is square. */
+.splash__stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, 340px);
+  height: min(62vw, 260px);
+}
+
+.splash__intro {
+  width: min(62vw, 260px);
+  height: 100%;
+  object-fit: contain;
+  border-radius: 32px;
+}
+
+/* No video or GIF: a clay globe drops in on a spring, then the brand lands. */
+.splash__drop {
+  display: grid;
+  place-items: center;
+  animation: splash-drop 1100ms var(--spring-bouncy) both;
+}
+
+.splash__globe {
+  display: inline-block;
+  width: 128px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #eef3ff 0%, #a8c5ff 55%, #7d97ee 100%);
+  box-shadow:
+    0 3px 5px rgb(var(--shadow-rgb) / 0.18),
+    12px 18px 30px rgb(var(--shadow-rgb) / 0.3),
+    inset 10px 12px 18px rgb(255 255 255 / 0.7),
+    inset -12px -14px 20px rgb(40 50 140 / 0.35);
+}
+
+/* The static signature: present from the start (it names the dialog), shown once the intro lands. */
+.splash__signature {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(2.75rem, 12vw, 4.25rem);
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+  text-shadow:
+    -2px -2px 0 rgb(255 255 255 / 0.8),
+    3px 4px 6px rgb(var(--shadow-rgb) / 0.3);
+  opacity: 0;
+}
+
+.splash__stage[data-intro="landed"] .splash__signature {
+  animation: splash-sign-in var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+/* With the full logo (mascot over the wordmark, taller than wide) the stage grows. */
+.splash__stage--logo {
+  height: min(78vw, 320px);
+}
+
+.splash__logo {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.splash__globe--small {
+  flex-shrink: 0;
+  width: 0.8em;
+  box-shadow:
+    0 2px 3px rgb(var(--shadow-rgb) / 0.18),
+    4px 6px 12px rgb(var(--shadow-rgb) / 0.28),
+    inset 4px 5px 8px rgb(255 255 255 / 0.7),
+    inset -5px -6px 9px rgb(40 50 140 / 0.35);
+}
+
+/* PLAY: a thick coral clay button that bounces while it waits. White on the coral face is 3.3:1 (large text). */
+.splash-play {
+  position: relative;
+  isolation: isolate;
+  min-width: 220px;
+  min-height: 84px;
+  padding: 0 var(--space-7);
+  border: 0;
+  border-radius: 46px 40px 44px 42px / 42px 46px 40px 44px;
+  background: radial-gradient(circle at 30% 25%, #ffa385 0%, #f0603e 58%, #e2532f 100%);
+  box-shadow:
+    0 3px 5px rgb(150 50 25 / 0.25),
+    12px 18px 32px rgb(200 80 50 / 0.38),
+    inset 8px 10px 16px rgb(255 255 255 / 0.45),
+    inset -10px -12px 18px rgb(140 35 15 / 0.4);
+  color: #ffffff;
+  font: inherit;
+  font-size: clamp(1.75rem, 7vw, 2.25rem);
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.1em;
+  text-shadow: 0 2px 0 rgb(140 35 15 / 0.45);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+/* Pressed: a deeper inset shade fades in on its own layer (opacity, not box-shadow). */
+.splash-play::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  box-shadow:
+    inset 10px 12px 18px rgb(140 35 15 / 0.45),
+    inset -6px -8px 12px rgb(255 255 255 / 0.3);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.splash-play[data-ready] {
+  animation: splash-bounce 900ms ease-in-out infinite alternate;
+}
+
+.splash-play[data-ready]:active {
+  animation: none;
+  transform: translateY(3px) scale(0.95);
+}
+
+.splash-play[data-ready]:active::after {
+  opacity: 1;
+}
+
+.splash-play[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.splash-play:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 6px;
+}
+
+.splash__tagline {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step-1);
+  font-weight: 600;
+  animation: splash-pulse 1.4s ease-in-out infinite alternate;
+}
+
+.splash__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+/* A trail of three dots, each hopping in turn. */
+.splash-dots {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.splash-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f0603e;
+  animation: splash-dot 1.1s ease-in-out infinite;
+}
+
+.splash-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.splash-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
 .game-heading {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
-}
-
-/* In a round: a small clay badge with the brand's clay dot, above the round's title. */
-.brand {
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--clay-surface);
-  box-shadow: var(--clay-shadow-sm);
-  color: var(--ink);
-  font-size: var(--step--1);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.brand::before {
-  content: "";
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #e6eeff, var(--accent));
-  box-shadow:
-    inset 2px 2px 3px rgb(255 255 255 / 0.8),
-    inset -2px -3px 4px rgb(var(--shadow-rgb) / 0.25);
 }
 
 .game-tagline {
@@ -1924,6 +2167,59 @@ html[data-challenge="pending"] .setup-only {
   }
 }
 
+/* Splash: the globe drops in, the signature pops, PLAY bounces, the tagline pulses, the dots hop. */
+@keyframes splash-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-160px) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes splash-sign-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes splash-bounce {
+  from {
+    transform: translateY(0) scale(1);
+  }
+  to {
+    transform: translateY(-8px) scale(1.03);
+  }
+}
+
+@keyframes splash-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+@keyframes splash-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-5px);
+  }
+}
+
 /* The QR modal rises out of the page on a spring, and drops back when closed. */
 @keyframes clay-modal-in {
   from {
@@ -2166,6 +2462,20 @@ html[data-challenge="pending"] .setup-only {
   .map-tip__card,
   .qr-modal {
     animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .splash-play[data-ready],
+  .splash__tagline,
+  .splash-dots span {
+    animation: none;
+  }
+
+  .splash__stage[data-intro="landed"] .splash__signature {
+    animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .splash--leaving .splash__card {
+    transform: none; /* the exit is a plain fade */
   }
 
   .qr-dialog--closing .qr-modal {

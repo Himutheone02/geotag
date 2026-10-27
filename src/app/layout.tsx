@@ -18,11 +18,11 @@ export const metadata: Metadata = {
 
 /**
  * Runs before the page paints. When the page was opened from a challenge link (?route=),
- * it hides the setup screen until the game has read the link, so the player goes
- * straight into the route instead of seeing the setup screen flash first. If the game's
- * script never loads, the setup screen comes back after 4 seconds.
+ * it hides the boot-up splash for good and the setup screen until the game has read the
+ * link, so the player goes straight into the route. If the game's script never loads,
+ * the setup screen comes back after 4 seconds.
  */
-const CHALLENGE_PENDING_SCRIPT = `(function(){try{if(/[?&]route=/.test(location.search)){var d=document.documentElement;d.setAttribute("data-challenge","pending");setTimeout(function(){d.removeAttribute("data-challenge")},4000)}}catch(e){}})();`;
+const CHALLENGE_PENDING_SCRIPT = `(function(){try{if(/[?&]route=/.test(location.search)){var d=document.documentElement;d.setAttribute("data-challenge","pending");d.setAttribute("data-skip-splash","");setTimeout(function(){d.removeAttribute("data-challenge")},4000)}}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

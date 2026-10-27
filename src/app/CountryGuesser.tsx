@@ -12,7 +12,8 @@ import ClayButton from "@/components/ui/ClayButton";
 import ClayCard from "@/components/ui/ClayCard";
 import ClayInput, { type ClayInputOption } from "@/components/ui/ClayInput";
 import type { CountrySource, EmpireKey, EmpireRound } from "@/data/loadCountries";
-import { getSetting, saveRound, setSetting, type RoundRecord } from "@/utils/db";
+import SplashScreen, { SPLASH_EXIT_MS, type BrandAssets } from "@/components/game/SplashScreen";
+import { getSetting, initDb, saveRound, setSetting, type RoundRecord } from "@/utils/db";
 import { dailyChallenge, dailyTargets, dateKey, type DailySource } from "@/utils/dailySeed";
 import {
   answerForInput,
@@ -43,6 +44,12 @@ import { BRAND_NAME, buildShareText, paceGrid, routeGrid } from "@/utils/share";
 // while the player is still on the setup screen.
 const loadSvgMap = () => import("@/components/game/SvgMap");
 const SvgMap = lazy(loadSvgMap);
+/** What the splash screen's PLAY waits for: the profile database open, the map data loaded. */
+const prepareGame = () => Promise.allSettled([loadSvgMap(), initDb()]);
+const NO_BRAND: BrandAssets = { splashLogo: null, introVideo: null, introGif: null };
+/** The header logo: a transparent PNG in /public. */
+export const LOGO_SRC = "/logo.png";
+
 // The QR modal (and the QR library inside it) loads only after a route ends.
 const loadQrShareModal = () => import("@/components/game/QrShareModal");
 const QrShareModal = lazy(loadQrShareModal);
@@ -315,9 +322,31 @@ type Props = {
   source: CountrySource;
   /** Bundled-snapshot borders and continents: the only data the Daily Challenge is drawn from. */
   dailySource: DailySource;
+  /** Splash files (full logo, boot-up animation) found in /public. */
+  brand?: BrandAssets;
+  /** The boot-up splash (on by default). Challenge links skip it either way. */
+  showSplash?: boolean;
 };
 
-export default function CountryGuesser({ countries, empires, source, dailySource }: Props) {
+export default function CountryGuesser({
+  countries,
+  empires,
+  source,
+  dailySource,
+  brand = NO_BRAND,
+  showSplash = true,
+}: Props) {
+  // Boot-up splash: "open" (the game behind is inert), "leaving" (exit playing, game live), "gone".
+  const [splash, setSplash] = useState<"open" | "leaving" | "gone">(showSplash ? "open" : "gone");
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (splash === "leaving") {
+      // The game is live again: put keyboard and screen-reader focus at its top.
+      titleRef.current?.focus({ preventScroll: true });
+      const timer = setTimeout(() => setSplash("gone"), SPLASH_EXIT_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [splash]);
   const countryIndex = useMemo(() => buildIndex(countries), [countries]);
   const capitalIndex = useMemo(() => buildIndex(countries, "capitals"), [countries]);
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
@@ -557,6 +586,8 @@ export default function CountryGuesser({ countries, empires, source, dailySource
    * tag plays the same puzzle. A bad link falls back to the setup screen with the reason.
    */
   function openChallenge(raw: string) {
+    // A scanned challenge goes straight in: no boot-up splash in the way.
+    setSplash("gone");
     // Drop the parameter so a reload or "Choose another round" doesn't relaunch it.
     window.history.replaceState(window.history.state, "", window.location.pathname + window.location.hash);
     document.documentElement.removeAttribute("data-challenge");
@@ -965,17 +996,29 @@ export default function CountryGuesser({ countries, empires, source, dailySource
   );
   const shortestBetween = route ? route.shortest.slice(1, -1).map(nameOf) : [];
 
+  // The transparent logo, straight on the page background: no tile, no badge, no text.
+  // Its height is set in CSS (.brand-logo); its alt text names the heading it sits in.
+  const logo = <img className="brand-logo" src={LOGO_SRC} alt={BRAND_NAME} />;
+
   return (
     <>
+      {splash !== "gone" && (
+        <SplashScreen assets={brand} prepare={prepareGame} leaving={splash === "leaving"} onPlay={() => setSplash("leaving")} />
+      )}
+
+      {/* While the splash is up, the game is inert: no focus, hidden from screen readers. */}
+      <div className="game-shell" inert={splash === "open" || undefined}>
       <header className="game-header">
         {status === "setup" ? (
           <div className="game-heading">
-            <h1 className="game-title brand-title">{BRAND_NAME}</h1>
+            <h1 className="game-title brand-title" ref={titleRef} tabIndex={-1}>
+              {logo}
+            </h1>
             <p className="game-tagline">{answerSetting === "capitals" ? "Name every capital." : "Name every country."}</p>
           </div>
         ) : (
           <div className="game-heading">
-            <p className="brand">{BRAND_NAME}</p>
+            {logo}
             <h1 className="game-title">
               {isRoute && route ? `${nameOf(route.start)} to ${nameOf(route.end)}` : roundTitle}
               {session.daily && <span className="daily-badge">Daily</span>}
@@ -1409,6 +1452,7 @@ export default function CountryGuesser({ countries, empires, source, dailySource
           ? "Country list from REST Countries, refreshed daily."
           : "Country list from the bundled snapshot (REST Countries didn't respond)."}
       </p>
+      </div>
     </>
   );
 }

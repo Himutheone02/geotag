@@ -8,7 +8,8 @@ import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, t
 import { buildBorderGraph, pickRoute } from "@/utils/pathfinding";
 import { dailyChallenge, dateKey } from "@/utils/dailySeed";
 import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
-import { CONTINENTS } from "./CountryGuesser";
+import { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
+import { CONTINENTS, LOGO_SRC } from "./CountryGuesser";
 
 // Count ClayCard renders: ClayCard is a plain child of CountryGuesser, so it
 // re-renders exactly when CountryGuesser does. Used to prove timer ticks don't.
@@ -40,7 +41,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
 });
 
 afterEach(() => {
@@ -643,7 +644,7 @@ describe("Daily Challenge", () => {
     const [y, m, d] = date.split("-").map(Number);
     vi.setSystemTime(new Date(y, m - 1, d, 12));
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
   }
   async function play() {
     await act(async () => {}); // the card checks the profile for today's result
@@ -709,7 +710,7 @@ describe("Daily Challenge uses only the bundled snapshot", () => {
     vi.setSystemTime(new Date(y, m - 1, d, 12));
     root = createRoot(container);
     act(() =>
-      root.render(<CountryGuesser countries={live} empires={empires} source="rest-countries" dailySource={dailySource} />),
+      root.render(<CountryGuesser countries={live} empires={empires} source="rest-countries" dailySource={dailySource} showSplash={false} />),
     );
   }
   function dateWith(kind: "pathfinding" | "continent", pred: (c: ReturnType<typeof dailyChallenge<string>>) => boolean = () => true) {
@@ -753,7 +754,7 @@ describe("challenge links (?route=)", () => {
     window.history.replaceState(null, "", `/?${query}`);
     root = createRoot(container);
     act(() =>
-      root.render(<CountryGuesser countries={live} empires={empires} source="snapshot" dailySource={dailySource} />),
+      root.render(<CountryGuesser countries={live} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />),
     );
   }
   afterEach(() => {
@@ -1063,6 +1064,73 @@ describe("map taps", () => {
     clickButton("Play Oceania again");
     await loadMap();
     expect(tooltip()).toBeNull();
+  });
+});
+
+describe("boot-up splash and logo", () => {
+  function mountWith(props: { showSplash?: boolean }) {
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() =>
+      root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} {...props} />),
+    );
+  }
+  const shell = () => $(".game-shell")!;
+  const play = () => $<HTMLButtonElement>(".splash-play")!;
+  const ready = async () => {
+    await act(async () => {
+      await import("@/components/game/SvgMap");
+    });
+    await act(async () => {});
+  };
+
+  it("covers the game on launch and keeps it inert until PLAY", async () => {
+    mountWith({});
+    expect($(".splash")).not.toBeNull();
+    expect(shell().hasAttribute("inert")).toBe(true);
+    expect(document.activeElement).toBe(play());
+    await ready();
+    expect(play().getAttribute("data-ready")).toBe("true");
+    act(() => play().click());
+    // The exit plays; the game is live underneath and focus moves to its heading.
+    expect($(".splash")!.classList.contains("splash--leaving")).toBe(true);
+    expect(shell().hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe($("h1"));
+    wait(SPLASH_EXIT_MS);
+    expect($(".splash")).toBeNull();
+    clickButton("Europe");
+    expect($("h1")!.textContent).toBe("Europe");
+  });
+
+  it("a challenge link skips the splash", () => {
+    act(() => root.unmount());
+    search.params = new URLSearchParams("route=PRT-POL");
+    root = createRoot(container);
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} />));
+    expect($(".splash")).toBeNull();
+    expect(shell().hasAttribute("inert")).toBe(false);
+    expect($("h1")!.textContent).toBe("Portugal to Poland");
+    search.params = new URLSearchParams();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("shows just the logo image in the header: the setup screen's heading, then above the round title", () => {
+    mountWith({ showSplash: false });
+    const heading = $("h1")!;
+    const setupLogo = heading.querySelector<HTMLImageElement>("img.brand-logo")!;
+    expect(setupLogo.getAttribute("src")).toBe(LOGO_SRC);
+    expect(LOGO_SRC).toBe("/logo.png");
+    expect(setupLogo.alt).toBe("geotag"); // the heading's name for screen readers
+    // Nothing else in the heading: no wordmark, no clay badge around the logo.
+    expect(heading.childElementCount).toBe(1);
+    expect(heading.textContent).toBe("");
+    expect(heading.nextElementSibling!.textContent).toBe("Name every country.");
+    clickButton("Europe");
+    const roundLogo = $<HTMLImageElement>(".game-heading > img.brand-logo")!;
+    expect(roundLogo.getAttribute("src")).toBe("/logo.png");
+    expect(roundLogo.nextElementSibling!.tagName).toBe("H1");
+    expect($("h1")!.textContent).toBe("Europe");
+    expect($(".brand")).toBeNull();
   });
 });
 

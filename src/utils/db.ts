@@ -139,6 +139,20 @@ export async function setSetting<T>(key: string, value: T): Promise<boolean> {
   }
 }
 
+/**
+ * Opens the profile database ahead of time (the splash screen waits for this).
+ * Resolves true when storage is ready, false when this browser won't store anything;
+ * the game works either way, so it never rejects.
+ */
+export async function initDb(): Promise<boolean> {
+  try {
+    await openDb();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Test hook: forget the cached connection (e.g. after swapping in a fresh fake IndexedDB). */
 export function resetDbConnection() {
   connection = null;

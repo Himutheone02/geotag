@@ -23,7 +23,7 @@ function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
 }
 
 function unmount() {

@@ -26,6 +26,7 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/HintPanel.tsx` | "Get a hint (n/3)" button and revealed hints, plus the pure helpers `pickHintTarget` and `initialsOf`. |
 | `src/components/game/DailyCard.tsx` | The setup screen's Daily Challenge card: today's puzzle, and once played, the first result with its Share button. |
 | `src/components/game/ShareResult.tsx` | "Share result": copies the share text with `navigator.clipboard.writeText`; if the clipboard is unavailable the text stays visible to copy by hand. |
+| `src/components/game/SplashScreen.tsx` | Boot-up screen: animated logo (video, else GIF, else a CSS intro), the "geotag" signature, the coral PLAY button and a loader. PLAY unlocks once IndexedDB is open and the map data has loaded. |
 | `src/components/game/QrShareModal.tsx` | "Share via QR": a native modal `<dialog>` with the route's challenge link as a QR code (`qrcode.react`'s `QRCodeSVG`), pressed into a clay well. Loaded on demand. |
 | `src/components/game/ProfilePanel.tsx` | The Profile & Stats tab: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
@@ -138,6 +139,25 @@ geotag - Daily Pathfinding 2026-10-26
 - **Pathfinding:** one square per move. 🟩 one country closer to the destination, 🟨 just as far, 🟥 further (steps back included).
 - **List rounds:** up to 10 squares, each a tenth of the round's countries in the order named, by pace: 🟩 up to 6 s per country, 🟨 up to 15 s, 🟥 slower, ⬜ not reached. Hints add 💡 n; a forfeit adds 🏳️.
 - A round where suggestions showed adds "🔤 with suggestions".
+
+## Boot-up splash and logo
+
+**Brand files** go in `/public`. The splash files are checked on the server when the page is built, so the splash never requests one that isn't there. The header logo is not checked: the header always uses it.
+
+| File | Used for | Without it |
+| --- | --- | --- |
+| `public/logo.png` (transparent, 511×168) | Header logo: the "geotag" wordmark alone, straight on the page background with a soft drop-shadow, 48px tall, 56px from 768px wide up. Its alt text ("geotag") names the heading. | **Required.** There's no fallback: without it the header shows a broken image. |
+| `public/assets/logo-full.webp` (transparent, 719×900) | The full logo (mascot in the ring over the wordmark) the splash lands on, up to 320px tall | A clay globe and the "geotag" wordmark |
+| `public/assets/boot-up.mp4` | The splash's animated logo (muted, inline, autoplay) | The GIF, if there is one |
+| `public/assets/boot-up.gif` | Animated logo when there's no video, or when autoplay is refused | A CSS intro: a clay globe drops in on a spring |
+
+Both logo files were cut from the supplied artwork (a JPEG with the peach-lavender gradient baked in): the gradient was modelled and matted out, so the soft shadows stay as transparent shadows, and everything inside the ring was kept opaque. A transparent export from the original source would be cleaner; drop it in at the same paths and sizes. The cutouts are made for light backgrounds: on a dark one, the matted shadows read as a pale glow.
+
+**The sequence:** the splash is in the server HTML, so it covers the game from the first paint. The intro plays: a video until it ends (8 s at most), a GIF for 2.6 s, or the CSS drop. Then the "geotag" signature lands. PLAY shows a dotted loader and stays locked until the profile database is open and the map chunk has loaded (8 s at most, then it unlocks anyway: the game works without either). PLAY, or Enter/Space since it has focus, fades the splash out while its card scales to 105% over 500 ms, transform and opacity only, and focus moves to the game's heading.
+
+- **The video** is server-rendered with `muted`, `autoplay` and `playsinline`, so mobile browsers play it without a prompt. If the browser still refuses (e.g. iOS Low Power Mode), or the file fails, it falls back to the GIF, then the CSS intro. Players who prefer reduced motion skip straight to the signature.
+- **Focus trap:** while the splash is up, the game behind it is `inert`: keyboard focus can't reach it and screen readers don't see it. The splash is a labelled modal dialog with PLAY focused.
+- **Challenge links skip the splash:** a scanned `?route=` link goes straight into the route (the inline script in `layout.tsx` hides the splash before first paint), so the timer never runs behind it.
 
 ## Map taps
 
