@@ -1,9 +1,10 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { lazy, Suspense, useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
 import DailyCard from "@/components/game/DailyCard";
-import HintPanel, { MAX_HINTS, pickHintTarget } from "@/components/game/HintPanel";
+import HintPanel, { initialsOf, MAX_HINTS, pickHintTarget } from "@/components/game/HintPanel";
+import MapTooltip from "@/components/game/MapTooltip";
 import ProfilePanel from "@/components/game/ProfilePanel";
 import ShareResult from "@/components/game/ShareResult";
 import Timer, { formatElapsed } from "@/components/game/Timer";
@@ -826,6 +827,99 @@ export default function CountryGuesser({ countries, empires, source, dailySource
         : undefined,
     [route, index, won],
   );
+  /* ---------------- Map taps ----------------
+     During a round the map is inert until all three hints are used; then tapping a
+     country of the round shows its initials (or its name, once named). After the round,
+     tapping any country shows its name (and capital in Capitals mode). */
+  const mapStageRef = useRef<HTMLDivElement>(null);
+  const [mapTap, setMapTap] = useState<{
+    code: string;
+    x: number;
+    y: number;
+    round: number;
+    status: GameStatus;
+    taps: number;
+  } | null>(null);
+  // Read by the (stable) click handler, so SvgMap's memo isn't broken by a new callback each render.
+  const tapContext = useRef({ round: session.round, status });
+  useEffect(() => {
+    tapContext.current = { round: session.round, status };
+  });
+  const mapClickable = useMemo<ReadonlySet<string> | null>(() => {
+    if (isOver) return playable;
+    if (isPlaying && !isRoute && session.hintsUsed >= MAX_HINTS) return targetSet;
+    return null; // fewer than 3 hints: no peeking
+  }, [isOver, isPlaying, isRoute, session.hintsUsed, playable, targetSet]);
+  const onMapClick = useCallback((code: string | null, at: { clientX: number; clientY: number }) => {
+    const stage = mapStageRef.current;
+    if (!code || !stage) {
+      setMapTap(null);
+      return;
+    }
+    const rect = stage.getBoundingClientRect();
+    setMapTap((prev) => ({
+      code,
+      x: at.clientX - rect.left,
+      y: at.clientY - rect.top,
+      ...tapContext.current,
+      taps: (prev?.taps ?? 0) + 1,
+    }));
+  }, []);
+
+  /** What a tap on this country reveals right now, or null if nothing. */
+  function mapTipFor(code: string): { title: string; detail?: string; announce: string } | null {
+    const c = countryIndex.byCode.get(code);
+    if (!c || !mapClickable?.has(code)) return null;
+    const capitals = `${c.capitals.length > 1 ? "Capitals" : "Capital"}: ${c.capitals.join(", ")}`;
+    if (isOver) {
+      return isCapitals ? { title: c.name, detail: capitals, announce: `${c.name}. ${capitals}.` } : { title: c.name, announce: c.name };
+    }
+    const named = guesses.find((g) => g.country.code === code);
+    if (named) {
+      return isCapitals
+        ? { title: named.label ?? c.capitals[0], detail: c.name, announce: `${named.label ?? c.capitals[0]}, ${c.name}` }
+        : { title: c.name, announce: c.name };
+    }
+    const initials = initialsOf(isCapitals ? (c.capitals[0] ?? c.name) : c.name);
+    return { title: initials, announce: `Initials: ${initials}` };
+  }
+  const tipOpen = mapTap !== null && mapTap.round === session.round && mapTap.status === status;
+  const tip = tipOpen ? mapTipFor(mapTap.code) : null;
+  const mapNote = !mapClickable
+    ? null
+    : isOver
+      ? `Tap any country to see its name${isCapitals ? " and capital" : ""}.`
+      : isCapitals
+        ? "Tap a country of this round to see its capital's initials."
+        : "Tap a missing country to see its initials.";
+
+  // The tooltip stays up after the finger lifts; it closes on the next tap elsewhere, or Escape.
+  const tipShown = tip !== null;
+  useEffect(() => {
+    if (!tipShown) return;
+    const close = () => setMapTap(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onPointerDown = (e: PointerEvent) => {
+      if (!mapStageRef.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [tipShown]);
+
+  /** The tooltip and its screen-reader announcement, inside the map's positioned stage. */
+  const mapOverlay = (
+    <>
+      {tip && mapTap && <MapTooltip key={mapTap.taps} tip={{ x: mapTap.x, y: mapTap.y, title: tip.title, detail: tip.detail }} />}
+      <p className="visually-hidden" aria-live="polite">
+        {tip?.announce ?? ""}
+      </p>
+    </>
+  );
+
   // "Create NFC Challenge": a link that opens this exact route. Only built after a round, on the client.
   const challengeLink =
     isOver && route && typeof window !== "undefined"
@@ -1199,37 +1293,51 @@ export default function CountryGuesser({ countries, empires, source, dailySource
 
       {status !== "setup" && isRoute && route && routeFrame && (
         <ClayCard as="section" aria-label="Map" className="map-card">
-          <Suspense fallback={<div className="map-placeholder" />}>
-            <SvgMap
-              key={session.round}
-              frame={routeFrame}
-              label={`${nameOf(route.start)} to ${nameOf(route.end)}`}
-              theme="Pathfinding"
-              regions={regions}
-              targets={allCodes}
-              named={namedSet}
-              highlight={null}
-              endpoints={routeEndpoints}
-              description={`Map of the route from ${nameOf(route.start)} to ${nameOf(route.end)}: ${guesses.length} ${guesses.length === 1 ? "country" : "countries"} on the route so far.`}
-            />
-          </Suspense>
+          <div className="map-stage" ref={mapStageRef}>
+            <Suspense fallback={<div className="map-placeholder" />}>
+              <SvgMap
+                key={session.round}
+                frame={routeFrame}
+                label={`${nameOf(route.start)} to ${nameOf(route.end)}`}
+                theme="Pathfinding"
+                regions={regions}
+                targets={allCodes}
+                named={namedSet}
+                highlight={null}
+                endpoints={routeEndpoints}
+                description={`Map of the route from ${nameOf(route.start)} to ${nameOf(route.end)}: ${guesses.length} ${guesses.length === 1 ? "country" : "countries"} on the route so far.`}
+                clickable={mapClickable}
+                onCountryClick={onMapClick}
+                selected={tip ? mapTap?.code : null}
+              />
+            </Suspense>
+            {mapOverlay}
+          </div>
+          {mapNote && <p className="map-note">{mapNote}</p>}
         </ClayCard>
       )}
 
       {status !== "setup" && current && (
         <ClayCard as="section" aria-label="Map" className="map-card">
-          <Suspense fallback={<div className="map-placeholder" />}>
-            <SvgMap
-              key={session.round}
-              frame={current.key}
-              label={current.title}
-              theme={current.theme}
-              regions={regions}
-              targets={session.targetCodes}
-              named={namedSet}
-              highlight={highlight}
-            />
-          </Suspense>
+          <div className="map-stage" ref={mapStageRef}>
+            <Suspense fallback={<div className="map-placeholder" />}>
+              <SvgMap
+                key={session.round}
+                frame={current.key}
+                label={current.title}
+                theme={current.theme}
+                regions={regions}
+                targets={session.targetCodes}
+                named={namedSet}
+                highlight={highlight}
+                clickable={mapClickable}
+                onCountryClick={onMapClick}
+                selected={tip ? mapTap?.code : null}
+              />
+            </Suspense>
+            {mapOverlay}
+          </div>
+          {mapNote && <p className="map-note">{mapNote}</p>}
         </ClayCard>
       )}
 

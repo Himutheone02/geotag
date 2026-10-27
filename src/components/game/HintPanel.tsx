@@ -39,14 +39,14 @@ export function pickHintTarget(
 
 const MINOR_WORDS = new Set(["and", "of", "the"]);
 
-/** "Burkina Faso" -> "B.F.", "São Tomé and Príncipe" -> "S.T.P.", "Guinea-Bissau" -> "G.B." */
+/** "Burkina Faso" -> "B. F.", "São Tomé and Príncipe" -> "S. T. P.", "Guinea-Bissau" -> "G. B." */
 export function initialsOf(name: string): string {
   return (
     name
       .split(/[\s-]+/)
       .filter((w) => w && !MINOR_WORDS.has(w.toLowerCase()))
       .map((w) => w[0].toUpperCase() + ".")
-      .join("") || name[0]
+      .join(" ") || name[0]
   );
 }
 
@@ -139,6 +139,11 @@ export default function HintPanel({
                   </li>
                 ))}
               </ul>
+              <span className="hint-tap">
+                {capitals
+                  ? "Tap a country on the map to see its capital's initials."
+                  : "Tap a missing country on the map to see its initials."}
+              </span>
             </li>
           )}
         </ol>

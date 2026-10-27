@@ -621,7 +621,7 @@ describe("Capitals mode", () => {
     for (let i = 0; i < 3; i++) act(() => hintButton().click());
     const initials = [...container.querySelectorAll(".initial")].map((e) => e.textContent);
     expect(initials).toContain("C."); // Canberra
-    expect(initials).toContain("P.M."); // Port Moresby
+    expect(initials).toContain("P. M."); // Port Moresby
     expect(hints()[2]).toMatch(/^Initials of the 14 capitals still missing:/);
   });
 
@@ -868,6 +868,138 @@ describe("Share Result", () => {
     await act(async () => clickButton("Share result"));
     expect($(".share-toast--failed")!.textContent).toMatch(/^Couldn't reach the clipboard/);
     expect($(".share-preview")).not.toBeNull();
+  });
+});
+
+describe("map taps", () => {
+  const shape = (code: string) =>
+    container.querySelector(`.world-map [data-code="${code}"][data-clickable], .world-map .map-country[data-code="${code}"]`)!;
+  const tapMap = (code: string) =>
+    act(() => {
+      shape(code).dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 100, clientY: 100 }));
+    });
+  const tooltip = () => $(".map-tip")?.textContent ?? null;
+  const announced = () => $(".map-stage [aria-live]")!.textContent;
+  const useAllHints = () => {
+    for (let i = 0; i < 3; i++) act(() => hintButton().click());
+  };
+
+  it("is inert during a round until all three hints are used", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    act(() => hintButton().click());
+    act(() => hintButton().click());
+    expect(container.querySelector(".world-map [data-clickable]")).toBeNull();
+    tapMap("PNG");
+    expect(tooltip()).toBeNull();
+    expect($(".map-note")).toBeNull();
+  });
+
+  it("after the third hint, a missing country shows only its initials", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    useAllHints();
+    expect($(".map-note")!.textContent).toBe("Tap a missing country to see its initials.");
+    expect(shape("PNG").getAttribute("data-clickable")).toBe("true");
+    tapMap("PNG");
+    expect(tooltip()).toBe("P. N. G.");
+    expect(announced()).toBe("Initials: P. N. G.");
+    expect($(".map-selected")).not.toBeNull();
+  });
+
+  it("shows a named country's full name, and ignores countries outside the round", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    useAllHints();
+    typeKeys("Fiji");
+    tapMap("FJI");
+    expect(tooltip()).toBe("Fiji");
+    expect(shape("IDN").hasAttribute("data-clickable")).toBe(false); // Indonesia is in frame but in Asia
+    tapMap("IDN");
+    expect(tooltip()).toBeNull();
+  });
+
+  it("stays up after the tap (no timeout), and closes on Escape, a tap outside, or a tap on the sea", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    useAllHints();
+    tapMap("AUS");
+    wait(10_000);
+    expect(tooltip()).toBe("A.");
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(tooltip()).toBeNull();
+
+    tapMap("AUS");
+    act(() => {
+      input().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(tooltip()).toBeNull();
+
+    tapMap("AUS");
+    act(() => {
+      $(".world-map")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(tooltip()).toBeNull();
+  });
+
+  it("in Capitals mode, shows the initials of the capital", async () => {
+    clickButton("Capitals");
+    clickButton("Oceania");
+    await loadMap();
+    useAllHints();
+    tapMap("AUS");
+    expect(tooltip()).toBe("C."); // Canberra
+    tapMap("PNG");
+    expect(tooltip()).toBe("P. M."); // Port Moresby
+  });
+
+  it("after the round, any country shows its full name", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    clickButton("Forfeit");
+    expect($(".map-note")!.textContent).toBe("Tap any country to see its name.");
+    tapMap("PNG");
+    expect(tooltip()).toBe("Papua New Guinea");
+    tapMap("IDN"); // outside the round, but the round is over
+    expect(tooltip()).toBe("Indonesia");
+  });
+
+  it("after a Capitals round, shows the name and the capital", async () => {
+    clickButton("Capitals");
+    clickButton("Africa");
+    await loadMap();
+    clickButton("Forfeit");
+    tapMap("ZAF");
+    expect(tooltip()).toBe("South AfricaCapitals: Pretoria, Bloemfontein, Cape Town"); // in the data's order
+    tapMap("KEN");
+    expect(tooltip()).toBe("KenyaCapital: Nairobi");
+    expect(announced()).toBe("Kenya. Capital: Nairobi.");
+  });
+
+  it("a route's map is inert while playing (no hints there) and tappable once it ends", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    clickButton("Pathfinding");
+    clickButton("Start");
+    await loadMap();
+    expect(container.querySelector(".world-map [data-clickable]")).toBeNull();
+    clickButton("Forfeit");
+    const here = $(".map-endpoint--start")!.getAttribute("data-code")!;
+    tapMap(here);
+    expect(tooltip()).toBe(byCode.get(here)!.name);
+    vi.restoreAllMocks();
+  });
+
+  it("a new round starts with the tooltip closed", async () => {
+    clickButton("Oceania");
+    await loadMap();
+    clickButton("Forfeit");
+    tapMap("AUS");
+    expect(tooltip()).toBe("Australia");
+    clickButton("Play Oceania again");
+    await loadMap();
+    expect(tooltip()).toBeNull();
   });
 });
 

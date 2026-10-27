@@ -10,11 +10,11 @@ const inRegion = (r: string) => countries.filter((c) => c.region === r);
 describe("initialsOf", () => {
   it.each([
     ["Kenya", "K."],
-    ["Burkina Faso", "B.F."],
-    ["São Tomé and Príncipe", "S.T.P."],
-    ["Guinea-Bissau", "G.B."],
-    ["Saint Vincent and the Grenadines", "S.V.G."],
-    ["DR Congo", "D.C."],
+    ["Burkina Faso", "B. F."],
+    ["São Tomé and Príncipe", "S. T. P."],
+    ["Guinea-Bissau", "G. B."],
+    ["Saint Vincent and the Grenadines", "S. V. G."],
+    ["DR Congo", "D. C."],
   ])("%s -> %s", (name, initials) => {
     expect(initialsOf(name)).toBe(initials);
   });

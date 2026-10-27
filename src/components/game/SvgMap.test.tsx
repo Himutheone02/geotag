@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import { CONTINENTS, type RoundKey } from "@/app/CountryGuesser";
@@ -123,6 +123,97 @@ describe("SvgMap", () => {
   it("pulses a ring around a hinted microstate", () => {
     render([], "SMR");
     expect(container.querySelector(".map-hint-ring")).not.toBeNull();
+  });
+});
+
+describe("SvgMap clicks", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const targets = codesIn("Europe");
+  const named = new Set<string>();
+  const onCountryClick = vi.fn();
+  const render = (props: { clickable?: ReadonlySet<string> | null; selected?: string | null } = {}) =>
+    act(() =>
+      root.render(
+        <SvgMap
+          frame="Europe"
+          label="Europe"
+          theme="Europe"
+          regions={regions}
+          targets={targets}
+          named={named}
+          highlight={null}
+          onCountryClick={onCountryClick}
+          {...props}
+        />,
+      ),
+    );
+  const click = (el: Element, clientX = 120, clientY = 80) =>
+    act(() => {
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX, clientY }));
+    });
+  const $ = (sel: string) => container.querySelector(sel)!;
+
+  beforeEach(() => {
+    onCountryClick.mockReset();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("is inert unless given clickable countries", () => {
+    render();
+    expect($("svg").hasAttribute("data-interactive")).toBe(false);
+    expect(container.querySelector("[data-clickable]")).toBeNull();
+    click($('.map-country[data-code="FRA"]'));
+    expect(onCountryClick).not.toHaveBeenCalled();
+  });
+
+  it("marks only the clickable countries, and reports a click on one with the tap position", () => {
+    render({ clickable: new Set(["FRA", "VAT"]) });
+    expect($("svg").getAttribute("data-interactive")).toBe("true");
+    expect($('.map-country[data-code="FRA"]').getAttribute("data-clickable")).toBe("true");
+    expect($('.map-country[data-code="DEU"]').hasAttribute("data-clickable")).toBe(false);
+    click($('.map-country[data-code="FRA"]'), 33, 44);
+    expect(onCountryClick).toHaveBeenLastCalledWith("FRA", { clientX: 33, clientY: 44 });
+  });
+
+  it("reports null for a click on a country that isn't clickable, or on the sea", () => {
+    render({ clickable: new Set(["FRA"]) });
+    click($('.map-country[data-code="DEU"]'));
+    expect(onCountryClick).toHaveBeenLastCalledWith(null, expect.anything());
+    click($("svg"));
+    expect(onCountryClick).toHaveBeenLastCalledWith(null, expect.anything());
+  });
+
+  it("gives clickable microstates a tap target three times their dot", () => {
+    render({ clickable: new Set(["VAT", "FRA"]) });
+    const hit = $('.map-hit[data-code="VAT"]');
+    const dot = $('.map-marker[data-code="VAT"]');
+    expect(Number(hit.getAttribute("r"))).toBeCloseTo(Number(dot.getAttribute("r")) * 3, 5);
+    expect(container.querySelector('.map-hit[data-code="FRA"]')).toBeNull(); // big enough already
+    click(hit);
+    expect(onCountryClick).toHaveBeenLastCalledWith("VAT", expect.anything());
+  });
+
+  it("keeps the answer field focused: mousedown on the map does nothing by default", () => {
+    render({ clickable: new Set(["FRA"]) });
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    act(() => {
+      $('.map-country[data-code="FRA"]').dispatchEvent(down);
+    });
+    expect(down.defaultPrevented).toBe(true);
+  });
+
+  it("outlines the selected country on its own layer", () => {
+    render({ clickable: new Set(["FRA"]), selected: "FRA" });
+    expect(container.querySelector(".map-selected path")).not.toBeNull();
+    render({ clickable: new Set(["FRA"]), selected: null });
+    expect(container.querySelector(".map-selected")).toBeNull();
   });
 });
 

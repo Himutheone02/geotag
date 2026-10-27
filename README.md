@@ -21,7 +21,8 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/ui/ClayInput.tsx` | Clay text field with an always-present label (`hideLabel` hides it visually only). Forwards `ref` (React 19). Given `suggestions`, it becomes an ARIA combobox with a floating `ClayCard` list (arrows, Enter, Escape, click). |
 | `src/components/ui/ClayButton.tsx` | Clay button, `primary` or `soft`, `md` or `sm`; lifts on hover, sinks when pressed. |
 | `src/components/game/Timer.tsx` | Isolated count-up stopwatch (MM:SS). Owns its own state, so ticks never re-render the game. |
-| `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, pulses the stage-2 hint, and takes a static color per country (`fills`) for the heatmap. Memoized and lazy-loaded. |
+| `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, pulses the stage-2 hint, and takes a static color per country (`fills`) for the heatmap. Optional clicks (`clickable`, `onCountryClick`, `selected`). Memoized and lazy-loaded. |
+| `src/components/game/MapTooltip.tsx` | The clay tooltip shown by a map tap: absolutely positioned at the tap, kept inside the map, springs open. No library. |
 | `src/components/game/HintPanel.tsx` | "Get a hint (n/3)" button and revealed hints, plus the pure helpers `pickHintTarget` and `initialsOf`. |
 | `src/components/game/DailyCard.tsx` | The setup screen's Daily Challenge card: today's puzzle, and once played, the first result with its Share button. |
 | `src/components/game/ShareResult.tsx` | Copy-to-clipboard button with `navigator.clipboard.writeText` ("Share result", "Create NFC Challenge"); if the clipboard is unavailable the text stays visible to copy by hand. |
@@ -133,6 +134,23 @@ geotag - Daily Pathfinding 2026-10-26
 - **Pathfinding:** one square per move. 🟩 one country closer to the destination, 🟨 just as far, 🟥 further (steps back included).
 - **List rounds:** up to 10 squares, each a tenth of the round's countries in the order named, by pace: 🟩 up to 6 s per country, 🟨 up to 15 s, 🟥 slower, ⬜ not reached. Hints add 💡 n; a forfeit adds 🏳️.
 - A round where suggestions showed adds "🔤 with suggestions".
+
+## Map taps
+
+The map only answers taps when that can't be used to cheat:
+
+| When | What's tappable | A tap shows |
+| --- | --- | --- |
+| During a round, fewer than 3 hints | Nothing | — |
+| During a list round, all 3 hints used | The round's countries | A missing country: only its initials ("P. N. G."), or its capital's initials in Capitals mode. A named one: its name (and the capital you gave). |
+| During a route | Nothing (routes have no hints) | — |
+| After a round (won or forfeited) | Every country on the map | Its name, plus its capital(s) in Capitals mode |
+
+- **One listener:** `SvgMap` takes a single `onClick` on the `<svg>` and reads the tapped element's `data-code`, instead of ~240 handlers. Clickable shapes get `data-clickable` (pointer cursor), and small countries drawn as dots get an invisible tap target three times the dot's size.
+- **Phones:** the tooltip stays up after the finger lifts. It closes on the next tap elsewhere (or on the sea), on Escape, or when the round changes. Tapping the map doesn't take focus from the answer field, so the keyboard stays up.
+- **60 fps:** the tooltip springs open on transform and opacity only. The tapped country's outline is drawn on its own layer outside the map's SVG filters, so nothing re-runs a filter.
+- The stage-3 hint and a note under the map say when the map is tappable. Initials are now written with spaces everywhere ("B. F.").
+- Map taps are pointer-only. Keyboard and screen-reader players get the same information from the stage-3 hint list and the result screen's lists.
 
 ## Recall heatmap
 

@@ -1574,6 +1574,85 @@ html[data-challenge="pending"] .setup-only {
   padding: clamp(var(--space-3), 2.5vw, var(--space-5));
 }
 
+/* --- Map taps (hint level 3, or after the round) --- */
+.map-stage {
+  position: relative; /* anchors the tap tooltip */
+}
+
+.world-map[data-interactive] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.world-map [data-clickable] {
+  cursor: pointer;
+}
+
+/* Invisible, larger tap targets over the dots of small countries. */
+.map-hit {
+  fill: transparent;
+}
+
+/* The tapped country: a static outline on its own unfiltered layer. */
+.map-selected path,
+.map-selected circle {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  animation: clay-fade-in 160ms ease-out both;
+}
+
+.map-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: min(260px, calc(100% - 16px));
+}
+
+.map-tip__card {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 20px 18px 22px 18px / 18px 22px 18px 20px;
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-lifted);
+  text-align: center;
+  transform-origin: var(--tip-origin-x, 50%) 100%;
+  animation: clay-tip-pop var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.map-tip--below .map-tip__card {
+  transform-origin: var(--tip-origin-x, 50%) 0;
+}
+
+.map-tip__title {
+  font-size: var(--step-1);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+}
+
+.map-tip__detail {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  line-height: 1.4;
+}
+
+.map-note {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  text-align: center;
+}
+
+.hint-tap {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
 /* The sea is a pressed-in clay well; land sits raised on it. */
 .world-map,
 .map-placeholder {
@@ -1729,6 +1808,18 @@ html[data-challenge="pending"] .setup-only {
   to {
     opacity: 0;
     transform: translateY(-10px) scale(0.95);
+  }
+}
+
+/* The map tooltip springs out of the tap point (transform and opacity only). */
+@keyframes clay-tip-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -1935,7 +2026,8 @@ html[data-challenge="pending"] .setup-only {
   .share-toast,
   .daily-card,
   .notice-card,
-  .stamp-slot--earned .stamp {
+  .stamp-slot--earned .stamp,
+  .map-tip__card {
     animation: clay-fade-in 120ms ease-out both;
   }
 

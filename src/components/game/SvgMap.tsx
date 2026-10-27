@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState, type AnimationEvent } from "react";
+import { memo, useMemo, useState, type AnimationEvent, type MouseEvent } from "react";
 import { geoGraticule, geoNaturalEarth1, geoPath, type GeoPath, type GeoProjection } from "d3-geo";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { feature } from "topojson-client";
@@ -209,6 +209,21 @@ type SvgMapProps = {
    * the clay layer, with no pop: use with an empty `named` set. Stable object.
    */
   fills?: Readonly<Record<string, { color: string; title: string }>>;
+  /**
+   * Countries that respond to clicks: they get a pointer cursor, and small countries drawn
+   * as dots get a larger invisible tap target. null or absent: the map isn't interactive.
+   * Must be a stable Set between renders.
+   */
+  clickable?: ReadonlySet<string> | null;
+  /**
+   * Click on a country's shape or dot. Called with its code if it's clickable, or with null
+   * for a click anywhere else on the map (the sea, a country that isn't clickable), so the
+   * caller can close whatever the last click opened. One listener on the <svg> serves every
+   * path. Must be stable between renders (useCallback).
+   */
+  onCountryClick?: (code: string | null, at: { clientX: number; clientY: number }) => void;
+  /** Outline this country (the one a tooltip is about). */
+  selected?: string | null;
 };
 
 /** Clay depth for SVG: outer drop shadow + light top-left inner edge + dark bottom-right inner edge. */
@@ -260,7 +275,21 @@ function ClayFilter({ id, depth }: { id: string; depth: number }) {
  * Memoized: typing re-renders the game on every keystroke, but the map only
  * re-renders when the named set or the hint changes.
  */
-function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpoints, description, fills }: SvgMapProps) {
+function SvgMap({
+  frame,
+  label,
+  theme,
+  regions,
+  targets,
+  named,
+  highlight,
+  endpoints,
+  description,
+  fills,
+  clickable = null,
+  onCountryClick,
+  selected = null,
+}: SvgMapProps) {
   const geometry = useMemo(() => buildMapGeometry(frame, targets), [frame, targets]);
   // In themed rounds the whole map shares one color; in World Mode each country uses its continent's.
   const regionOf = (code: string) => (theme ? undefined : regions[code]);
@@ -273,6 +302,18 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
   };
   const hint = highlight && !named.has(highlight) ? geometry.targets.get(highlight) : undefined;
   const [vx, vy, vw, vh] = geometry.viewBox;
+  const interactive = clickable !== null && onCountryClick !== undefined;
+  // data-clickable gives the pointer cursor (and, on iOS, makes taps produce clicks).
+  const canClick = (code: string | null | undefined) => (interactive && code && clickable!.has(code) ? true : undefined);
+  const selectedShape = selected
+    ? (geometry.targets.get(selected) ?? geometry.shapes.find((sh) => sh.code === selected))
+    : undefined;
+  const selectedMarker = selected ? geometry.targets.get(selected)?.marker : undefined;
+
+  function handleClick(e: MouseEvent<SVGSVGElement>) {
+    const code = (e.target as Element).closest("[data-code]")?.getAttribute("data-code") ?? null;
+    onCountryClick!(code && clickable!.has(code) ? code : null, { clientX: e.clientX, clientY: e.clientY });
+  }
 
   return (
     <svg
@@ -282,6 +323,10 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
       role="img"
       aria-label={description ?? `Map of ${label}: ${named.size} of ${targets.length} countries named`}
       data-theme={theme ?? undefined}
+      data-interactive={interactive || undefined}
+      onClick={interactive ? handleClick : undefined}
+      // Keep focus (and the phone keyboard) in the answer field while tapping the map.
+      onMouseDown={interactive ? (e) => e.preventDefault() : undefined}
     >
       <defs>
         <ClayFilter id="map-clay-land" depth={1} />
@@ -294,6 +339,7 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
             key={i}
             d={s.d}
             data-code={s.code ?? undefined}
+            data-clickable={canClick(s.code)}
             className={s.code && targetSet.has(s.code) ? "map-country map-country--target" : "map-country"}
           />
         ))}
@@ -306,7 +352,14 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
             const fill = fills[code];
             if (!t?.d || !fill) return null;
             return (
-              <path key={`fill-${code}`} d={t.d} data-code={code} className="map-named map-named--fill" style={{ fill: fill.color }}>
+              <path
+                key={`fill-${code}`}
+                d={t.d}
+                data-code={code}
+                data-clickable={canClick(code)}
+                className="map-named map-named--fill"
+                style={{ fill: fill.color }}
+              >
                 <title>{fill.title}</title>
               </path>
             );
@@ -314,7 +367,16 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
         {namedInOrder.map((code) => {
           const t = geometry.targets.get(code);
           if (!t?.d || !settled.has(code)) return null;
-          return <path key={code} d={t.d} data-code={code} data-region={regionOf(code)} className="map-named" />;
+          return (
+            <path
+              key={code}
+              d={t.d}
+              data-code={code}
+              data-clickable={canClick(code)}
+              data-region={regionOf(code)}
+              className="map-named"
+            />
+          );
         })}
       </g>
 
@@ -363,6 +425,7 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
               cy={t.marker[1]}
               r={geometry.markerRadius}
               data-code={code}
+              data-clickable={canClick(code)}
               data-region={named.has(code) ? regionOf(code) : undefined}
               className={named.has(code) ? "map-marker map-marker--named" : "map-marker"}
             />
@@ -380,6 +443,7 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
               <g
                 key={role}
                 data-code={t.code}
+                data-clickable={canClick(t.code)}
                 className={`map-endpoint map-endpoint--${role}${reached ? " map-endpoint--reached" : ""}`}
               >
                 {t.d && <path d={t.d} />}
@@ -400,12 +464,41 @@ function SvgMap({ frame, label, theme, regions, targets, named, highlight, endpo
         </g>
       )}
 
+      {/* The country a tooltip is about: a static outline on an unfiltered layer (no filter re-runs). */}
+      {(selectedShape?.d || selectedMarker) && (
+        <g className="map-selected" key={selected}>
+          {selectedShape?.d && <path d={selectedShape.d} />}
+          {selectedMarker && <circle cx={selectedMarker[0]} cy={selectedMarker[1]} r={geometry.markerRadius * 1.8} />}
+        </g>
+      )}
+
       {hint && (
         <g className="map-hint" data-code={hint.code}>
           {hint.d && <path d={hint.d} className="map-hint-shape" />}
           {hint.marker && (
             <circle cx={hint.marker[0]} cy={hint.marker[1]} r={geometry.markerRadius * 2} className="map-hint-ring" />
           )}
+        </g>
+      )}
+
+      {/* Small countries are dots too small to tap: give each clickable one an invisible target 3x its size. */}
+      {interactive && (
+        <g className="map-hits">
+          {targets.map((code) => {
+            const t = geometry.targets.get(code);
+            if (!t?.marker || !clickable!.has(code)) return null;
+            return (
+              <circle
+                key={code}
+                cx={t.marker[0]}
+                cy={t.marker[1]}
+                r={geometry.markerRadius * 3}
+                data-code={code}
+                data-clickable
+                className="map-hit"
+              />
+            );
+          })}
         </g>
       )}
     </svg>
