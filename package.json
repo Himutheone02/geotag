@@ -15,6 +15,7 @@
     "d3-geo": "^3.1.1",
     "fastest-levenshtein": "^1.0.16",
     "next": "^16.4.3",
+    "qrcode.react": "4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "topojson-client": "^3.1.0"

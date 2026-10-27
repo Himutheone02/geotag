@@ -43,6 +43,9 @@ import { BRAND_NAME, buildShareText, paceGrid, routeGrid } from "@/utils/share";
 // while the player is still on the setup screen.
 const loadSvgMap = () => import("@/components/game/SvgMap");
 const SvgMap = lazy(loadSvgMap);
+// The QR modal (and the QR library inside it) loads only after a route ends.
+const loadQrShareModal = () => import("@/components/game/QrShareModal");
+const QrShareModal = lazy(loadQrShareModal);
 
 /* ------------------------------------------------------------------ */
 /* Rounds                                                              */
@@ -278,7 +281,7 @@ export function sessionReducer(state: Session, action: SessionAction): Session {
 }
 
 /**
- * Reads a challenge link's `?route=` (e.g. from an NFC tag) and hands it to the game once.
+ * Reads a challenge link's `?route=` (e.g. scanned from a "Share via QR" code) and hands it to the game once.
  * Kept in its own component under a Suspense boundary: useSearchParams makes everything up
  * to the nearest boundary render on the client only, and the rest of the page should stay
  * in the prerendered HTML.
@@ -920,11 +923,22 @@ export default function CountryGuesser({ countries, empires, source, dailySource
     </>
   );
 
-  // "Create NFC Challenge": a link that opens this exact route. Only built after a round, on the client.
+  // "Share via QR": a link to this exact route, built from wherever the game is running
+  // (window.location.origin), so it's right on localhost, a preview and production alike.
+  // Only built after a round, on the client.
   const challengeLink =
     isOver && route && typeof window !== "undefined"
       ? `${window.location.origin}${window.location.pathname}?route=${routeParam(route)}`
       : null;
+  // Which round's QR modal is open; a new round closes it.
+  const [qrRound, setQrRound] = useState<number | null>(null);
+  const qrOpen = qrRound === session.round && challengeLink !== null;
+  const closeQr = useCallback(() => setQrRound(null), []);
+  // Fetch the QR chunk while the player reads the result, so the modal opens instantly.
+  const routeOver = isOver && isRoute;
+  useEffect(() => {
+    if (routeOver) void loadQrShareModal();
+  }, [routeOver]);
   const movesWord = (n: number) => (n === 1 ? "1 move" : `${n} moves`);
   const roundTitle = current ? (isCapitals ? `${current.title} capitals` : current.title) : null;
   /** The answer shown for a country this round: its name, or its capital. */
@@ -1235,14 +1249,17 @@ export default function CountryGuesser({ countries, empires, source, dailySource
           </ol>
           {shareText && <ShareResult text={shareText} />}
           {challengeLink && (
-            <ShareResult
-              text={challengeLink}
-              label="Create NFC Challenge"
-              variant="soft"
-              preview="after-copy"
-              previewLabel="Challenge link"
-              copiedMessage="Link copied. Write it to an NFC tag with any NFC writer app."
-            />
+            <div className="qr-share">
+              <ClayButton variant="soft" aria-haspopup="dialog" onClick={() => setQrRound(session.round)}>
+                Share via QR
+              </ClayButton>
+              <p className="qr-share__note">Another phone scans it to play this exact route.</p>
+            </div>
+          )}
+          {qrOpen && (
+            <Suspense fallback={null}>
+              <QrShareModal url={challengeLink} routeName={`${nameOf(route.start)} to ${nameOf(route.end)}`} onClose={closeQr} />
+            </Suspense>
           )}
           <div className="result-actions">
             {session.challenge && (

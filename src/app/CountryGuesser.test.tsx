@@ -7,6 +7,7 @@ import { getDailySource, resolveEmpires, toSovereignStates, type RawCountry } fr
 import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, type Guess } from "./CountryGuesser";
 import { buildBorderGraph, pickRoute } from "@/utils/pathfinding";
 import { dailyChallenge, dateKey } from "@/utils/dailySeed";
+import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
 import { CONTINENTS } from "./CountryGuesser";
 
 // Count ClayCard renders: ClayCard is a plain child of CountryGuesser, so it
@@ -813,27 +814,89 @@ describe("challenge links (?route=)", () => {
     expect(notice()).toBe("");
   });
 
-  it("the route result creates a link to the same route, and offers to play it again", async () => {
-    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue();
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  it("Share via QR opens a modal whose code holds the exact route link", async () => {
     openLink("route=FRA-CHN");
     clickButton("Forfeit");
-    expect($('[aria-label="Challenge link"]')).toBeNull(); // shown once created
-    await act(async () => clickButton("Create NFC Challenge"));
+    expect(container.textContent).not.toContain("Create NFC Challenge");
+    await act(async () => {
+      await import("@/components/game/QrShareModal");
+    });
+    clickButton("Share via QR");
+    await act(async () => {});
+    const dialog = $<HTMLDialogElement>("dialog.qr-dialog")!;
+    expect(dialog.open).toBe(true);
+    expect(dialog.getAttribute("aria-labelledby")).toBe("qr-heading");
     const link = `${window.location.origin}/?route=FRA-CHN`;
-    expect(writeText).toHaveBeenCalledWith(link);
-    expect($('[aria-label="Challenge link"]')!.textContent).toBe(link);
-    expect(container.textContent).toContain("Write it to an NFC tag");
+    expect($(".qr-url")!.textContent).toBe(link);
+    expect(dialog.querySelector("svg title")!.textContent).toBe(`QR code for ${link}`);
+    // Light to draw: the whole code is one path (plus its white background).
+    expect(dialog.querySelectorAll(".qr-face svg path").length).toBeLessThanOrEqual(2);
+    expect($(".qr-modal .card-lead")!.textContent).toBe("France to China. Point another phone's camera at the code.");
+  });
+
+  it("the QR modal closes with its button, Escape or a backdrop click, after a short exit", async () => {
+    openLink("route=FRA-CHN");
+    clickButton("Forfeit");
+    await act(async () => {
+      await import("@/components/game/QrShareModal");
+    });
+    const open = async () => {
+      clickButton("Share via QR");
+      await act(async () => {});
+    };
+    await open();
+    const dialog = $<HTMLDialogElement>("dialog")!;
+    clickButton("Close");
+    expect(dialog.classList.contains("qr-dialog--closing")).toBe(true);
+    expect(dialog.open).toBe(true); // still showing its exit
+    wait(QR_EXIT_MS);
+    expect(dialog.open).toBe(false); // closed before removal, so focus returns to the button
+    expect($("dialog")).toBeNull();
+
+    await open();
+    act(() => {
+      $("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true }));
+    });
+    wait(QR_EXIT_MS);
+    expect($("dialog")).toBeNull();
+
+    await open();
+    act(() => $("dialog")!.click());
+    wait(QR_EXIT_MS);
+    expect($("dialog")).toBeNull();
+  });
+
+  it("a challenge result offers to play the route again", () => {
+    openLink("route=FRA-CHN");
+    clickButton("Forfeit");
     expect($(".share-preview")!.textContent).toMatch(/^geotag - Pathfinding Challenge\n/);
     clickButton("Play this route again");
     expect($("h1")!.textContent).toBe("France to China");
   });
 
-  it("random routes get the link too", () => {
+  it("random routes can be shared by QR too, and list rounds can't", () => {
     clickButton("Pathfinding");
     clickButton("Start");
     clickButton("Forfeit");
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Create NFC Challenge")).toBe(true);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Share via QR")).toBe(true);
+    clickButton("Choose another round");
+    clickButton("Continents");
+    clickButton("Oceania");
+    clickButton("Forfeit");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Share via QR")).toBe(false);
+  });
+});
+
+describe("isLocalOnly (QR links another phone can't open)", () => {
+  it.each([
+    ["localhost", true],
+    ["127.0.0.1", true],
+    ["[::1]", true],
+    ["0.0.0.0", true],
+    ["192.168.1.20", false], // a LAN address works for phones on the same Wi-Fi
+    ["geotag.vercel.app", false],
+  ])("%s -> %s", (host, local) => {
+    expect(isLocalOnly(host)).toBe(local);
   });
 });
 

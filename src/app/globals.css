@@ -1223,6 +1223,119 @@ body {
   color: var(--tone-error);
 }
 
+/* --- Share via QR --- */
+.qr-share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.qr-share__note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+/* A native modal <dialog>: the browser keeps it in the top layer, centered in the
+   viewport however far the page is scrolled. Reset its UA box; the clay card inside is
+   the visible modal, and the padding leaves room for the card's shadow. */
+.qr-dialog {
+  max-width: min(420px, 100vw);
+  max-height: 100dvh;
+  margin: auto;
+  padding: var(--space-6) var(--space-4);
+  border: 0;
+  background: transparent;
+  overflow: auto; /* short landscape phones can scroll it; the padding keeps the shadow unclipped */
+  color: var(--ink);
+}
+
+/* Dim the page behind. A flat tint fades on opacity only: no backdrop-filter blur,
+   which would re-blur the whole page every frame. */
+.qr-dialog::backdrop {
+  background: rgb(45 42 74 / 0.42);
+  animation: clay-fade-in 200ms ease-out both;
+}
+
+.qr-modal {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  box-shadow: var(--clay-shadow-lifted);
+  transform-origin: 50% 60%;
+  animation: clay-modal-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.qr-modal .card-title,
+.qr-modal .card-lead {
+  margin: 0;
+}
+
+.qr-dialog--closing .qr-modal {
+  animation: clay-modal-out 220ms ease-in both;
+}
+
+.qr-dialog--closing::backdrop {
+  animation: clay-fade-out 220ms ease-in both;
+}
+
+/* The code pressed into the plastic: a deep well (heavy inset shade top-left, light on
+   the bottom-right wall), with the code itself on a flat white face, clear of the shading
+   so every module stays crisp for the camera. */
+.qr-well {
+  margin: var(--space-2) 0;
+  padding: var(--space-4);
+  border-radius: 34px 30px 36px 30px / 30px 36px 30px 34px;
+  background: var(--clay-surface-sunk);
+  box-shadow:
+    inset 12px 14px 24px rgb(var(--shadow-rgb) / 0.5),
+    inset 4px 5px 7px rgb(var(--shadow-rgb) / 0.28),
+    inset -10px -12px 20px rgb(255 255 255 / 0.95),
+    0 1px 0 rgb(255 255 255 / 0.9);
+}
+
+.qr-face {
+  padding: var(--space-2);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow:
+    inset 2px 3px 4px rgb(var(--shadow-rgb) / 0.12),
+    inset -2px -2px 3px rgb(255 255 255 / 0.9);
+}
+
+.qr-code {
+  display: block;
+  width: min(208px, 58vw);
+  height: auto;
+}
+
+.qr-url {
+  max-width: 100%;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.qr-warning {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 18px;
+  background: var(--daily-surface);
+  color: var(--daily-ink);
+  font-size: var(--step--1);
+  font-weight: 500;
+  text-align: left;
+}
+
+.qr-close {
+  min-width: 160px;
+}
+
 /* --- Daily Challenge --- */
 .daily-card {
   display: flex;
@@ -1811,6 +1924,29 @@ html[data-challenge="pending"] .setup-only {
   }
 }
 
+/* The QR modal rises out of the page on a spring, and drops back when closed. */
+@keyframes clay-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes clay-modal-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.94);
+  }
+}
+
 /* The map tooltip springs out of the tap point (transform and opacity only). */
 @keyframes clay-tip-pop {
   from {
@@ -2027,8 +2163,13 @@ html[data-challenge="pending"] .setup-only {
   .daily-card,
   .notice-card,
   .stamp-slot--earned .stamp,
-  .map-tip__card {
+  .map-tip__card,
+  .qr-modal {
     animation: clay-fade-in 120ms ease-out both;
+  }
+
+  .qr-dialog--closing .qr-modal {
+    animation: clay-fade-out 120ms ease-out both;
   }
 
   .clay-suggest--closing {

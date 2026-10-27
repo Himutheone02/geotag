@@ -25,7 +25,8 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/MapTooltip.tsx` | The clay tooltip shown by a map tap: absolutely positioned at the tap, kept inside the map, springs open. No library. |
 | `src/components/game/HintPanel.tsx` | "Get a hint (n/3)" button and revealed hints, plus the pure helpers `pickHintTarget` and `initialsOf`. |
 | `src/components/game/DailyCard.tsx` | The setup screen's Daily Challenge card: today's puzzle, and once played, the first result with its Share button. |
-| `src/components/game/ShareResult.tsx` | Copy-to-clipboard button with `navigator.clipboard.writeText` ("Share result", "Create NFC Challenge"); if the clipboard is unavailable the text stays visible to copy by hand. |
+| `src/components/game/ShareResult.tsx` | "Share result": copies the share text with `navigator.clipboard.writeText`; if the clipboard is unavailable the text stays visible to copy by hand. |
+| `src/components/game/QrShareModal.tsx` | "Share via QR": a native modal `<dialog>` with the route's challenge link as a QR code (`qrcode.react`'s `QRCodeSVG`), pressed into a clay well. Loaded on demand. |
 | `src/components/game/ProfilePanel.tsx` | The Profile & Stats tab: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
 | `src/utils/fuzzyMatch.ts` | Matching: `normalize`, `buildIndex` (country names, or capitals with `"capitals"`), `matchCountry`, `liveMatch` (per-keystroke rules), `suggestCountries` (autocomplete ranking), `answerForInput`, and the `Country` type. |
@@ -111,7 +112,7 @@ The setup screen's **Name the: Countries / Capitals** switch applies to every li
 - The date is the player's **local** date, like Wordle: the puzzle changes at local midnight.
 - The first finished attempt each day is the daily result. The card then shows it with a Share button, and **Play again** replays the same puzzle as an ordinary round (not tagged Daily, not shared as Daily).
 
-## Challenge links and NFC tags
+## Challenge links and QR sharing
 
 Opening `/?route=FRA-CHN` skips the setup screen and starts that route. `RouteChallengeParam` (in `CountryGuesser.tsx`) reads it with `useSearchParams` inside its own `<Suspense>`, so the rest of the page stays in the prerendered HTML.
 
@@ -119,7 +120,10 @@ Opening `/?route=FRA-CHN` skips the setup screen and starts that route. `RouteCh
 - **Same puzzle on every phone:** challenge routes are played on the bundled snapshot's borders, like the Daily Challenge.
 - **No flash:** a tiny script in `layout.tsx` hides the setup screen before first paint when the URL has `route=` ("Opening your challenge…"), until the game has read the link. If the game's script never loads, the setup screen comes back after 4 s.
 - The parameter is removed from the address bar once read, so a reload or "Choose another round" doesn't relaunch it.
-- **Create NFC Challenge** on every Pathfinding result copies `<this page>?route=START-END`. Write it to a tag with any NFC writer app (a plain URL record). Challenge results offer **Play this route again**, and share as "Pathfinding Challenge".
+- **Share via QR** on every Pathfinding result opens a modal with a QR code for `<this page>?route=START-END`, built from `window.location.origin` so it matches wherever the game is running. Another phone scans it with its camera and lands straight in the route. Challenge results offer **Play this route again**, and share as "Pathfinding Challenge".
+  - The modal is a native `<dialog>` opened with `showModal()`: it sits in the browser's top layer, centered in the viewport however far the page is scrolled, keeps keyboard focus inside, closes on Escape, Close or a tap on the backdrop, and returns focus to the button.
+  - The code is a single SVG `<path>`, drawn once and never animated. Only the card springs in (transform and opacity), and the backdrop is a flat tint (no blur). The QR library (`qrcode.react` 4.2.0, no dependencies) is in its own chunk, fetched while the result screen is showing.
+  - Error correction M with a 2-module quiet zone, dark ink on a flat white face, kept clear of the well's inset shadow so the camera sees crisp modules.
 
 ## Share result
 
@@ -240,7 +244,7 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 ## Known limits
 
 - A round counts as "with suggestions" once the list has shown any answer, even if none was picked. Such rounds can't earn Roman Emperor or Speedrunner, so switch Suggestions off before typing.
-- NFC tags written with a localhost or preview URL only work on that machine or deployment. Write tags from the production site.
+- A QR code made on `localhost` points at the scanning phone's own localhost, so it can't be opened elsewhere; the modal says so. Test phone-to-phone from the deployed site, or open the dev server by its network address (e.g. `http://192.168.1.20:3000`) with both phones on the same Wi-Fi. Vercel preview deployments may ask the scanning phone to log in if Deployment Protection is on; production links don't.
 - The profile lives in one browser. It doesn't sync between devices, and clearing site data erases it. Safari deletes script-written storage, IndexedDB included, for sites not visited in 7 days, unless the site is added to the Home Screen.
 - "Average time per mode" mixes round sizes: a Continents average blends Oceania (14) and Africa (54). Seconds per country and personal bests are the comparable numbers.
 - Suggestions don't narrow the answers down, but they still jog your memory ("b" lists every B country), so assisted times aren't comparable with unassisted ones. Use the filter.
