@@ -1138,6 +1138,41 @@ describe("boot-up splash and logo", () => {
   });
 });
 
+describe("header: Profile & Stats", () => {
+  const profileButton = () => $<HTMLButtonElement>(".header-actions .header-button");
+
+  it("sits in the header, not among the game modes", () => {
+    expect(profileButton()!.textContent).toBe("Profile & Stats");
+    expect(profileButton()!.closest(".brand-row")).not.toBeNull();
+    const modes = [...container.querySelectorAll(".mode-switch button")].map((b) => b.textContent);
+    expect(modes).toEqual(["Continents", "Empires", "World", "Pathfinding"]);
+  });
+
+  it("opens the profile in a modal dialog, and closes it", () => {
+    act(() => profileButton()!.click());
+    const dialog = $<HTMLDialogElement>("dialog.profile-dialog")!;
+    expect(dialog.open).toBe(true);
+    expect(dialog.getAttribute("aria-labelledby")).toBe("profile-heading");
+    expect(dialog.querySelector("#profile-heading")).not.toBeNull();
+    clickButton("Close");
+    wait(300);
+    expect($("dialog.profile-dialog")).toBeNull();
+  });
+
+  it("is there between rounds, not during one (the profile's map would give answers away)", () => {
+    clickButton("Oceania");
+    expect(profileButton()).toBeNull();
+    clickButton("Forfeit");
+    expect(profileButton()).not.toBeNull();
+  });
+
+  it("tells the layout which screen is showing", () => {
+    expect($(".game-shell")!.getAttribute("data-screen")).toBe("setup");
+    clickButton("Oceania");
+    expect($(".game-shell")!.getAttribute("data-screen")).toBe("round");
+  });
+});
+
 describe("Party Mode (pass-and-play)", () => {
   const graph = buildBorderGraph(countries);
   const puzzle = pickRoute(graph, { random: () => 0 })!;
@@ -1307,7 +1342,7 @@ describe("haptics", () => {
     mountOn();
     expect(toggle()!.getAttribute("aria-label")).toBe("Vibration");
     expect(toggle()!.getAttribute("aria-pressed")).toBe("true");
-    expect(toggle()!.parentElement!.classList.contains("brand-row")).toBe(true); // beside the logo
+    expect(toggle()!.closest(".brand-row")).not.toBeNull(); // beside the logo
     mountOn({ vibrate: false });
     expect(toggle()).toBeNull();
     mountOn({ coarse: false });

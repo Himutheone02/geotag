@@ -433,6 +433,70 @@ body {
   display: contents;
 }
 
+/* --- Desktop (1024px and up): a wider page, in two columns ---
+   The cards are the .game grid's own items (.game-shell adds no box), so each screen
+   places them by class; nothing moves in the markup, and phones keep the single column.
+   - Setup: the Daily Challenge on the left (it stays in view), the mode picker on the right.
+   - In a round: everything you do on the left (answer, hints, result, lists), the map on
+     the right, staying in view while the left column scrolls. */
+@media (min-width: 1024px) {
+  .game {
+    max-width: 1200px;
+    padding-inline: var(--space-6);
+    column-gap: var(--space-6);
+    align-items: start;
+  }
+
+  .game:has(> .game-shell[data-screen="setup"]) {
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  }
+
+  .game:has(> .game-shell[data-screen="round"]) {
+    grid-template-columns: minmax(380px, 460px) minmax(0, 1fr);
+  }
+
+  .game-shell[data-screen="setup"] > * {
+    grid-column: 1 / -1;
+  }
+
+  .game-shell[data-screen="setup"] > .daily-card {
+    grid-column: 1;
+    position: sticky;
+    top: var(--space-5);
+  }
+
+  .game-shell[data-screen="setup"] > .setup-only:not(.daily-card) {
+    grid-column: 2;
+  }
+
+  .game-shell[data-screen="round"] > * {
+    grid-column: 1;
+  }
+
+  .game-shell[data-screen="round"] > .game-header {
+    grid-column: 1 / -1;
+  }
+
+  .game-shell[data-screen="round"] > .map-card {
+    grid-column: 2;
+    grid-row: 2 / span 8;
+    position: sticky;
+    top: var(--space-5);
+  }
+
+  /* Kept within the screen, so the whole map stays visible while it sticks. */
+  .game-shell[data-screen="round"] > .map-card .world-map {
+    max-height: min(72vh, calc(100vh - 220px));
+  }
+
+  /* Pass and play's hand-over screen has no map: centered across both columns. */
+  .game-shell[data-screen="round"] > .handoff-card {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: min(100%, 640px);
+  }
+}
+
 .game-header {
   display: flex;
   align-items: center;
@@ -449,6 +513,82 @@ body {
   justify-content: space-between;
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* Profile & Stats and the vibration toggle, at the right end of the logo row on every screen. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+/* Profile & Stats: a round clay button (icon only) on phones, a pill with its name from 600px. */
+.header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface);
+  color: var(--ink);
+  box-shadow: var(--clay-shadow-sm);
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+.header-button:hover {
+  transform: translateY(-2px);
+}
+
+.header-button:active {
+  transform: scale(0.92);
+}
+
+.header-button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.header-button__icon {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.header-button__label {
+  /* Phones: icon only; the name stays for screen readers. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 600px) {
+  .header-button {
+    padding: 0 var(--space-4) 0 var(--space-3);
+  }
+
+  .header-button__label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
 }
 
 /* Vibration on/off: a small round clay button. Raised while on; pressed into the page while off. */
@@ -561,20 +701,18 @@ html[data-skip-splash] .splash {
   outline: none;
 }
 
-.splash__card {
+/* The logo, PLAY and the loader float straight on the full-screen gradient, centered:
+   no card behind them. The group still scales to 105% on the exit. */
+.splash__content {
   display: grid;
   justify-items: center;
   gap: var(--space-4);
   width: min(440px, 100%);
-  padding: var(--space-6) var(--space-5) var(--space-5);
-  border-radius: var(--radius-organic);
-  background: rgb(255 255 255 / 0.5);
-  box-shadow: var(--clay-shadow-lg);
   text-align: center;
   transition: transform var(--splash-exit, 500ms) cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.splash--leaving .splash__card {
+.splash--leaving .splash__content {
   transform: scale(1.05);
 }
 
@@ -661,9 +799,11 @@ html[data-skip-splash] .splash {
   outline-offset: 6px;
 }
 
+/* Straight on the gradient: full ink, and a shallow pulse (to 75%), so it stays above
+   4.5:1 contrast at its faintest. */
 .splash__tagline {
   margin: 0;
-  color: var(--ink-soft);
+  color: var(--ink);
   font-size: var(--step-1);
   font-weight: 600;
   animation: splash-pulse 1.4s ease-in-out infinite alternate;
@@ -826,11 +966,6 @@ html[data-skip-splash] .splash {
 .mode-option[aria-pressed="true"]:hover {
   box-shadow: var(--clay-shadow-pressed);
   transform: translateY(1px);
-}
-
-/* The profile tab isn't a game mode: a little extra space sets it apart. */
-.mode-option--profile {
-  margin-left: var(--space-2);
 }
 
 /* --- Profile & stats --- */
@@ -1657,6 +1792,44 @@ html[data-skip-splash] .splash {
   color: var(--ink);
 }
 
+/* Profile & Stats: the same kind of native modal, wider, scrolling inside. */
+.profile-dialog {
+  width: 100%;
+  max-width: min(960px, 100vw);
+  max-height: 100dvh;
+  margin: auto;
+  padding: var(--space-5) var(--space-3);
+  border: 0;
+  background: transparent;
+  overflow: auto;
+  color: var(--ink);
+}
+
+.profile-dialog::backdrop {
+  background: rgb(45 42 74 / 0.42);
+  animation: clay-fade-in 200ms ease-out both;
+}
+
+.profile-modal {
+  box-shadow: var(--clay-shadow-lifted);
+  transform-origin: 50% 30%;
+  animation: clay-modal-in var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.profile-modal__bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: calc(-1 * var(--space-4)); /* the panel's heading sits beside it */
+}
+
+.profile-dialog--closing .profile-modal {
+  animation: clay-modal-out 220ms ease-in both;
+}
+
+.profile-dialog--closing::backdrop {
+  animation: clay-fade-out 220ms ease-in both;
+}
+
 /* Dim the page behind. A flat tint fades on opacity only: no backdrop-filter blur,
    which would re-blur the whole page every frame. */
 .qr-dialog::backdrop {
@@ -2414,7 +2587,7 @@ html[data-challenge="pending"] .setup-only {
     opacity: 1;
   }
   to {
-    opacity: 0.55;
+    opacity: 0.75;
   }
 }
 
@@ -2579,10 +2752,6 @@ html[data-challenge="pending"] .setup-only {
     flex-direction: column;
   }
 
-  .mode-option--profile {
-    margin-left: 0;
-  }
-
   .answer-switch__label {
     flex-basis: 100%;
   }
@@ -2670,7 +2839,8 @@ html[data-challenge="pending"] .setup-only {
   .notice-card,
   .stamp-slot--earned .stamp,
   .map-tip__card,
-  .qr-modal {
+  .qr-modal,
+  .profile-modal {
     animation: clay-fade-in 120ms ease-out both;
   }
 
@@ -2684,11 +2854,12 @@ html[data-challenge="pending"] .setup-only {
     animation: clay-fade-in 120ms ease-out both;
   }
 
-  .splash--leaving .splash__card {
+  .splash--leaving .splash__content {
     transform: none; /* the exit is a plain fade */
   }
 
-  .qr-dialog--closing .qr-modal {
+  .qr-dialog--closing .qr-modal,
+  .profile-dialog--closing .profile-modal {
     animation: clay-fade-out 120ms ease-out both;
   }
 

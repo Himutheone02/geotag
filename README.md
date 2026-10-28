@@ -1,6 +1,6 @@
 # geotag
 
-Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: cross from one country to another by naming land neighbours. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and three progressive hints help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats on the setup screen's **Profile & Stats** tab. List rounds can be played for **capitals** instead of countries, a seeded **Daily Challenge** gives everyone the same puzzle each day, and results can be shared as a spoiler-free emoji grid.
+Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: cross from one country to another by naming land neighbours. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and three progressive hints help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats under **Profile & Stats** in the header. List rounds can be played for **capitals** instead of countries, a seeded **Daily Challenge** gives everyone the same puzzle each day, and results can be shared as a spoiler-free emoji grid.
 
 ```bash
 npm install
@@ -34,7 +34,8 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/PartyBoard.tsx` | Party Mode's leaderboard and `rankParty` (finishers by time, then moves; players who gave up last, unranked). |
 | `src/utils/scoreCard.ts` | "Save Score": draws the won route's card on a `<canvas>` (`renderScoreCard`), copies the live map with its computed styles inlined (`mapForExport`), names the file, and downloads the PNG. |
 | `src/components/game/QrShareModal.tsx` | "Share via QR": a native modal `<dialog>` with the route's challenge link as a QR code (`qrcode.react`'s `QRCodeSVG`), pressed into a clay well. Loaded on demand. |
-| `src/components/game/ProfilePanel.tsx` | The Profile & Stats tab: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
+| `src/components/game/ProfileDialog.tsx` | Profile & Stats, opened from the header: `ProfilePanel` in a native modal `<dialog>` (Escape or Close, focus back to the button). |
+| `src/components/game/ProfilePanel.tsx` | Profile & Stats: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
 | `src/utils/fuzzyMatch.ts` | Matching: `normalize`, `buildIndex` (country names, or capitals with `"capitals"`), `matchCountry`, `liveMatch` (per-keystroke rules), `suggestCountries` (autocomplete ranking), `answerForInput`, and the `Country` type. |
 | `src/utils/haptics.ts` | `vibrate()` (30 ms, feature-checked, never throws), `canVibrate()` and `hapticsUseful()` (the API exists and the pointer is coarse). |
@@ -198,7 +199,7 @@ geotag is an installable web app (PWA): Chrome checks it as installable with no 
 
 Without either file, its spot shows a broken image. Both were cut from the supplied artwork (a JPEG with the peach-lavender gradient baked in): the gradient was modelled and matted out, so the soft shadows stay as transparent shadows, and everything inside the ring was kept opaque. A transparent export from the original source would be cleaner; drop it in at the same paths and sizes. The cutouts are made for light backgrounds: on a dark one, the matted shadows read as a pale glow.
 
-**The sequence:** the splash is in the server HTML, so it covers the game from the first paint. The logo springs in (transform and opacity). PLAY shows a dotted loader and stays locked until the profile database is open and the map chunk has loaded (8 s at most, then it unlocks anyway: the game works without either). PLAY, or Enter/Space, fades the splash out while its card scales to 105% over 500 ms, transform and opacity only, and focus moves to the game's heading.
+**The sequence:** the splash is in the server HTML, so it covers the game from the first paint. The logo springs in (transform and opacity). PLAY shows a dotted loader and stays locked until the profile database is open and the map chunk has loaded (8 s at most, then it unlocks anyway: the game works without either). PLAY, or Enter/Space, fades the splash out while its content scales to 105% over 500 ms, transform and opacity only, and focus moves to the game's heading.
 
 - **Focus:** the splash is a labelled modal dialog, and focus starts on the dialog itself, not on PLAY. So no focus ring shows at launch; screen readers announce the dialog ("geotag", "Tap to start your adventure"); Enter or Space starts the game; and Tab reaches PLAY, whose ring then shows (keyboard focus only: a tap or click never shows it).
 - **Focus trap:** while the splash is up, the game behind it is `inert`: keyboard focus can't reach it and screen readers don't see it.
@@ -277,6 +278,15 @@ Naming a hinted country is confirmed in the panel and stops its pulse. The resul
 | `liveMatch` | 0 | 0 | 0 |
 
 With `liveMatch`, 191 of 195 correctly spelled names land on their last keystroke with no Enter. The other 4 (Niger, Guinea, Congo, Dominica) need Enter while their longer neighbour is unnamed. Each keystroke takes 0.5 ms median to process in the browser (p95 3.1 ms).
+
+## Layout
+
+- **Splash:** no card: the logo, PLAY, tagline and loader float centered on the full-screen peach-lavender gradient. The tagline is in full ink and pulses only to 75% opacity, so it stays above 4.5:1 contrast on the bare gradient at its faintest.
+- **Header:** the logo on the left; **Profile & Stats** and the vibration toggle on the right, on every screen. Profile & Stats is an icon on phones and a labelled pill from 600px. It isn't shown during a round: the profile's heatmap would show the map before the hints allow it.
+- **Phones and tablets (under 1024px):** one column, up to 760px wide.
+- **Desktop (1024px and up):** up to 1200px wide, in two columns, set in CSS by the screen (`.game-shell[data-screen="setup" | "round"]`, as `.game`'s grid items; no markup moves):
+  - **Setup:** the Daily Challenge on the left (it stays in view), the mode picker on the right, where the tile grids widen to fill it.
+  - **Rounds:** the answer field, hints, result and lists on the left; the map on the right, staying in view as the left column scrolls (its height capped to fit the screen). Pass and play's hand-over card is centered across both.
 
 ## Clay theme
 

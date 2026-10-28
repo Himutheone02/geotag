@@ -59,6 +59,8 @@ describe("SplashScreen", () => {
     expect(html).not.toContain("<video");
     expect(html).not.toContain("boot-up");
     expect(html).not.toContain("splash__stage");
+    expect(html).not.toContain("splash__card"); // no card behind the logo and PLAY
+    expect(html).toContain('class="splash__content"');
     const imgs = html.match(/<img[^>]*>/g)!;
     expect(imgs).toHaveLength(1);
     expect(imgs[0]).toContain(`src="${SPLASH_LOGO_SRC}"`);

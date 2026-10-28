@@ -5,7 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, us
 import DailyCard from "@/components/game/DailyCard";
 import HintPanel, { initialsOf, MAX_HINTS, pickHintTarget } from "@/components/game/HintPanel";
 import MapTooltip from "@/components/game/MapTooltip";
-import ProfilePanel from "@/components/game/ProfilePanel";
+import ProfileDialog from "@/components/game/ProfileDialog";
 import ShareResult from "@/components/game/ShareResult";
 import Timer, { formatElapsed } from "@/components/game/Timer";
 import ClayButton from "@/components/ui/ClayButton";
@@ -86,15 +86,14 @@ type Round = {
   outOfScope: ((countryName: string) => string) | null;
 };
 
-/** Tabs on the setup screen: one per game mode, plus the player's profile. */
-type SetupTab = GameMode | "profile";
+/** Tabs on the setup screen, one per game mode. (Profile & Stats is in the header.) */
+type SetupTab = GameMode;
 
 const SETUP_TABS: { tab: SetupTab; label: string }[] = [
   { tab: "continent", label: "Continents" },
   { tab: "historical", label: "Empires" },
   { tab: "world", label: "World" },
   { tab: "pathfinding", label: "Pathfinding" },
-  { tab: "profile", label: "Profile & Stats" },
 ];
 
 const CONTINENT_EMOJI: Record<Continent, string> = {
@@ -290,6 +289,16 @@ export function sessionReducer(state: Session, action: SessionAction): Session {
  * to the nearest boundary render on the client only, and the rest of the page should stay
  * in the prerendered HTML.
  */
+/** A person: the profile. Decorative: the button carries the name. */
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" className="header-button__icon">
+      <circle cx="12" cy="8.5" r="3.8" />
+      <path d="M4.5 20c.8-3.9 3.9-6 7.5-6s6.7 2.1 7.5 6" />
+    </svg>
+  );
+}
+
 /** A phone with vibration marks; struck through when vibration is off. Decorative: the button carries the name. */
 function VibrationIcon({ off }: { off: boolean }) {
   return (
@@ -409,6 +418,9 @@ export default function CountryGuesser({
   const inputRef = useRef<HTMLInputElement>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const handoffHeadingRef = useRef<HTMLHeadingElement>(null);
+  // "Profile & Stats", from the header, in a modal.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
   // Party Mode: the session, and its results (saved in IndexedDB, mirrored here).
   const [party, setParty] = useState<Party | null>(null);
   const [partyResults, setPartyResults] = useState<PartyResult[]>([]);
@@ -1185,9 +1197,10 @@ export default function CountryGuesser({
       )}
 
       {/* While the splash is up, the game is inert: no focus, hidden from screen readers. */}
-      <div className="game-shell" inert={splash === "open" || undefined}>
+      <div className="game-shell" data-screen={status === "setup" ? "setup" : "round"} inert={splash === "open" || undefined}>
+      {profileOpen && <ProfileDialog countries={countries} onClose={closeProfile} />}
       <header className="game-header">
-        {/* The logo, with the vibration toggle at the far right of its row. */}
+        {/* The logo, with Profile & Stats and the vibration toggle at the far right of its row. */}
         <div className="brand-row">
           {status === "setup" ? (
             <h1 className="game-title brand-title" ref={titleRef} tabIndex={-1}>
@@ -1196,18 +1209,32 @@ export default function CountryGuesser({
           ) : (
             logo
           )}
-          {hapticsOffered && (
-            <button
-              type="button"
-              className="haptics-toggle"
-              aria-label="Vibration"
-              aria-pressed={hapticsOn}
-              title={hapticsOn ? "Vibration on" : "Vibration off"}
-              onClick={toggleHaptics}
-            >
-              <VibrationIcon off={!hapticsOn} />
-            </button>
-          )}
+          <div className="header-actions">
+            {/* Not during a round: the profile's heatmap would show the map before the hints allow it. */}
+            {!isPlaying && (
+              <button
+                type="button"
+                className="header-button"
+                aria-haspopup="dialog"
+                onClick={() => setProfileOpen(true)}
+              >
+                <ProfileIcon />
+                <span className="header-button__label">Profile &amp; Stats</span>
+              </button>
+            )}
+            {hapticsOffered && (
+              <button
+                type="button"
+                className="haptics-toggle"
+                aria-label="Vibration"
+                aria-pressed={hapticsOn}
+                title={hapticsOn ? "Vibration on" : "Vibration off"}
+                onClick={toggleHaptics}
+              >
+                <VibrationIcon off={!hapticsOn} />
+              </button>
+            )}
+          </div>
         </div>
         {status === "setup" ? (
           <p className="game-tagline">{answerSetting === "capitals" ? "Name every capital." : "Name every country."}</p>
@@ -1282,7 +1309,7 @@ export default function CountryGuesser({
                 key={tab}
                 variant="soft"
                 size="sm"
-                className={tab === "profile" ? "mode-option mode-option--profile" : "mode-option"}
+                className="mode-option"
                 aria-pressed={setupMode === tab}
                 onClick={() => setSetupMode(tab)}
               >
@@ -1290,8 +1317,6 @@ export default function CountryGuesser({
               </ClayButton>
             ))}
           </div>
-
-          {setupMode === "profile" && <ProfilePanel headingId="setup-heading" countries={countries} />}
 
           {setupMode === "continent" && (
             <>

@@ -73,7 +73,7 @@ export default function SplashScreen({ prepare, leaving, onPlay }: SplashScreenP
       tabIndex={-1}
       onKeyDown={onKeyDown}
     >
-      <div className="splash__card">
+      <div className="splash__content">
         {/* The logo's alt text names the dialog. */}
         <h2 id="splash-title" className="splash__signature">
           <img className="splash__logo" src={SPLASH_LOGO_SRC} alt={BRAND_NAME} fetchPriority="high" />
