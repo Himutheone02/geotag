@@ -27,6 +27,19 @@ vi.mock("@/components/ui/ClayCard", async (importOriginal) => {
   };
 });
 
+// Record what Save Score asks the card renderer to draw (it still runs for real).
+const scoreCards = vi.hoisted(() => ({ inputs: [] as unknown[] }));
+vi.mock("@/utils/scoreCard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/scoreCard")>();
+  return {
+    ...actual,
+    renderScoreCard: (input: Parameters<typeof actual.renderScoreCard>[0]) => {
+      scoreCards.inputs.push(input);
+      return actual.renderScoreCard(input);
+    },
+  };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
@@ -1244,6 +1257,29 @@ describe("Save Score", () => {
     await act(async () => saveButton()!.click());
     await act(async () => {});
     expect($(".save-score__status")!.textContent).toBe("Couldn't make the score card in this browser.");
+  });
+});
+
+describe("Save Score heatmap", () => {
+  it("gives the card each step of the route with how long it took to find", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const puzzle = pickRoute(buildBorderGraph(countries), { random: () => 0 })!;
+    clickButton("Pathfinding");
+    clickButton("Start");
+    await loadMap();
+    const between = puzzle.shortest.slice(1, -1);
+    const pauses = [3, 9, 20, 1, 6, 2, 4, 8].slice(0, between.length);
+    between.forEach((code, i) => {
+      wait(pauses[i] * 1000);
+      typeKeys(byCode.get(code)!.name);
+      if ($<HTMLInputElement>("input")?.value) pressEnter();
+    });
+    scoreCards.inputs.length = 0;
+    await act(async () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Save Score")!.click());
+    const input = scoreCards.inputs[0] as { heat: { code: string; seconds: number }[]; title: string };
+    expect(input.title).toBe(`${byCode.get(puzzle.start)!.name} to ${byCode.get(puzzle.end)!.name}`);
+    expect(input.heat).toEqual(between.map((code, i) => ({ code, seconds: pauses[i] })));
+    vi.restoreAllMocks();
   });
 });
 

@@ -1137,6 +1137,11 @@ export default function CountryGuesser({
     const details = [party ? `Player ${party.player}` : null, movesWord(session.moves), `shortest ${route.par}`, date]
       .filter(Boolean)
       .join(" · ");
+    // The heatmap: each step of the final route, and how long it took since the one before.
+    const heat = session.guesses.map((g, i) => ({
+      code: g.country.code,
+      seconds: Math.max(0, ((g.at ?? 0) - (i > 0 ? (session.guesses[i - 1].at ?? 0) : 0)) / 1000),
+    }));
     try {
       const blob = await renderScoreCard({
         map: svg,
@@ -1144,6 +1149,7 @@ export default function CountryGuesser({
         title,
         time: finalTime,
         details,
+        heat,
       });
       if (!blob) throw new Error("This browser can't draw the card");
       downloadBlob(blob, scoreCardFileName(title));

@@ -81,7 +81,9 @@ Player 1's own result screen shows the shortest route before anyone presses Next
 
 ### Save Score
 
-On a won route, **Save Score** downloads a PNG keepsake (1080x1350): the final route map as the photo of an off-white instant-photo/trading card with a soft drop shadow on the peach-lavender backdrop, the route, the time in large type, moves, the shortest route's length and the date (and "Player N" in a party), and the geotag logo at the foot. It's drawn with the Canvas API only: the live map's `<svg>` is copied with each element's computed styles written in (an SVG drawn as an image can't see the page's CSS), drawn as an image, and the place names are set on the canvas in Fredoka. No network, no libraries. Browsers that can't draw on a canvas get a message instead.
+On a won route, **Save Score** downloads a PNG keepsake (1080x1350): the final route map, as a heatmap, as the photo of an off-white instant-photo/trading card with a soft drop shadow on the peach-lavender backdrop, the route, the time in large type, moves, the shortest route's length and the date (and "Player N" in a party), and the geotag logo at the foot. It's drawn with the Canvas API only: the live map's `<svg>` is copied with each element's computed styles written in (an SVG drawn as an image can't see the page's CSS), drawn as an image, and the place names are set on the canvas in Fredoka. No network, no libraries. Browsers that can't draw on a canvas get a message instead.
+
+- **The heatmap:** on the card, each country of the final route is colored by how long it took to find, counted from the step before (any wandering or backtracking in between counts toward the step that followed it). The scale runs from cool cyan (0 s) through pink to hot red (15 s and over), blended in OKLab (`heatColor` in `scoreCard.ts`), and a legend under the time shows it ("fast", the bar, "slow", 0 s to 15 s+). The start and destination keep their violet and gold. The on-screen map is unchanged.
 
 ### The border graph
 
