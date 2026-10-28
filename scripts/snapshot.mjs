@@ -1,5 +1,6 @@
-// Refreshes src/data/countries.json from the live REST Countries API.
-// The snapshot is the app's fallback when the API is down. Run: npm run snapshot
+// Maintenance script: refreshes src/data/countries.json from the REST Countries API.
+// countries.json is the app's only country data; the app itself never fetches it.
+// Run on your machine (npm run snapshot), then rebuild and redeploy.
 import { writeFile } from "node:fs/promises";
 
 // 10 fields: the API maximum. ccn3 and latlng are only used by scripts/build-map.mjs.

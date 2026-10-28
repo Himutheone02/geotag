@@ -75,6 +75,7 @@
   --route-step-soft: #c9f0ea;
   --route-end: #e8456b;
   --route-end-soft: #ffd4dd;
+  --route-missed: #e0483e; /* a given-up route: the shortest route's countries not reached */
 
   /* Map */
   --map-sea: #dce8fb;
@@ -436,7 +437,59 @@ body {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--space-4);
+  gap: var(--space-2) var(--space-4);
+}
+
+/* The logo's own row, full width, with the vibration toggle at its far right. */
+.brand-row {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Vibration on/off: a small round clay button. Raised while on; pressed into the page while off. */
+.haptics-toggle {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--clay-surface);
+  color: var(--ink);
+  box-shadow: var(--clay-shadow-sm);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+.haptics-toggle[aria-pressed="false"] {
+  color: var(--ink-soft);
+  box-shadow:
+    inset 3px 4px 7px rgb(var(--shadow-rgb) / 0.22),
+    inset -3px -4px 7px rgb(255 255 255 / 0.85);
+}
+
+.haptics-toggle:active {
+  transform: scale(0.9);
+}
+
+.haptics-toggle:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.haptics-toggle__icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* --- Brand --- */
@@ -501,6 +554,12 @@ html[data-skip-splash] .splash {
   pointer-events: none;
 }
 
+/* Focus starts on the dialog itself (so no ring shows on PLAY at launch). The dialog isn't
+   a control, so it shows no ring either; PLAY's ring still shows when it's reached by Tab. */
+.splash:focus {
+  outline: none;
+}
+
 .splash__card {
   display: grid;
   justify-items: center;
@@ -518,87 +577,23 @@ html[data-skip-splash] .splash {
   transform: scale(1.05);
 }
 
-/* Wider than tall so the signature (globe + wordmark) fits on one line; the intro media is square. */
-.splash__stage {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: min(100%, 340px);
-  height: min(62vw, 260px);
-}
-
-.splash__intro {
-  width: min(62vw, 260px);
-  height: 100%;
-  object-fit: contain;
-  border-radius: 32px;
-}
-
-/* No video or GIF: a clay globe drops in on a spring, then the brand lands. */
-.splash__drop {
-  display: grid;
-  place-items: center;
-  animation: splash-drop 1100ms var(--spring-bouncy) both;
-}
-
-.splash__globe {
-  display: inline-block;
-  width: 128px;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 28%, #eef3ff 0%, #a8c5ff 55%, #7d97ee 100%);
-  box-shadow:
-    0 3px 5px rgb(var(--shadow-rgb) / 0.18),
-    12px 18px 30px rgb(var(--shadow-rgb) / 0.3),
-    inset 10px 12px 18px rgb(255 255 255 / 0.7),
-    inset -12px -14px 20px rgb(40 50 140 / 0.35);
-}
-
-/* The static signature: present from the start (it names the dialog), shown once the intro lands. */
+/* The full logo, springing in on load. A plain image: no frame, no clipping, no rounded
+   corners; its height follows its width, capped at 16rem (Tailwind's w-full h-auto max-h-64
+   object-contain drop-shadow-md, in CSS). A drop-shadow, not a box-shadow, so the shadow
+   follows the artwork, not its rectangle. */
 .splash__signature {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
+  width: 100%;
   margin: 0;
-  color: var(--ink);
-  font-size: clamp(2.75rem, 12vw, 4.25rem);
-  font-weight: 700;
-  font-stretch: 112%;
-  letter-spacing: -0.01em;
-  text-shadow:
-    -2px -2px 0 rgb(255 255 255 / 0.8),
-    3px 4px 6px rgb(var(--shadow-rgb) / 0.3);
-  opacity: 0;
-}
-
-.splash__stage[data-intro="landed"] .splash__signature {
   animation: splash-sign-in var(--spring-bouncy-duration) var(--spring-bouncy) both;
-}
-
-/* With the full logo (mascot over the wordmark, taller than wide) the stage grows. */
-.splash__stage--logo {
-  height: min(78vw, 320px);
 }
 
 .splash__logo {
   display: block;
-  height: 100%;
-  width: auto;
-  max-width: 100%;
+  width: 100%;
+  height: auto;
+  max-height: 16rem;
   object-fit: contain;
-}
-
-.splash__globe--small {
-  flex-shrink: 0;
-  width: 0.8em;
-  box-shadow:
-    0 2px 3px rgb(var(--shadow-rgb) / 0.18),
-    4px 6px 12px rgb(var(--shadow-rgb) / 0.28),
-    inset 4px 5px 8px rgb(255 255 255 / 0.7),
-    inset -5px -6px 9px rgb(40 50 140 / 0.35);
+  filter: drop-shadow(0 3px 3px rgb(var(--shadow-rgb) / 0.12));
 }
 
 /* PLAY: a thick coral clay button that bounces while it waits. White on the coral face is 3.3:1 (large text). */
@@ -1466,13 +1461,18 @@ html[data-skip-splash] .splash {
   color: var(--tone-error);
 }
 
-/* --- Share via QR --- */
-.qr-share {
+/* --- After a route: Generate New Route, next to Share via QR --- */
+.route-next {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.route-next__buttons {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3) var(--space-4);
-  margin-top: var(--space-5);
 }
 
 .qr-share__note {
@@ -2002,6 +2002,56 @@ html[data-challenge="pending"] .setup-only {
   text-align: center;
 }
 
+/* The key for a given-up route's red countries (the color is never the only cue: the
+   result card lists them too). */
+.map-note--missed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.map-key--missed {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--route-missed);
+  box-shadow:
+    inset 1px 1px 2px rgb(255 255 255 / 0.6),
+    inset -1px -1px 2px rgb(var(--shadow-rgb) / 0.3);
+}
+
+/* Give Up (active routes only): small and recessed, pressed into the card rather than
+   raised out of it, so it's there when needed without competing with the answer field. */
+.give-up-row {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+
+.clay-button.give-up {
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  background: var(--clay-surface);
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  box-shadow:
+    inset 3px 4px 8px rgb(var(--shadow-rgb) / 0.2),
+    inset -3px -4px 8px rgb(255 255 255 / 0.85);
+}
+
+.clay-button.give-up:hover {
+  transform: none;
+  color: var(--tone-error);
+  box-shadow:
+    inset 4px 5px 10px rgb(var(--shadow-rgb) / 0.26),
+    inset -3px -4px 8px rgb(255 255 255 / 0.85);
+}
+
+.clay-button.give-up:active {
+  transform: scale(0.96);
+}
+
 .hint-tap {
   display: block;
   margin-top: var(--space-2);
@@ -2059,6 +2109,22 @@ html[data-challenge="pending"] .setup-only {
     clay-fade-in 180ms ease-out both;
 }
 
+/* A given-up route: the shortest route's countries the player didn't reach. They pop in
+   like named countries (unfiltered layer, then settled onto the clay layer). */
+.map-named.map-named--missed {
+  fill: var(--route-missed);
+}
+
+.map-marker--missed {
+  fill: var(--route-missed);
+  stroke: #ffffff;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    map-pop var(--spring-bouncy-duration) var(--spring-bouncy) both,
+    clay-fade-in 180ms ease-out both;
+}
+
 .map-marker {
   fill: var(--map-target);
   stroke: var(--map-target-edge);
@@ -2102,13 +2168,6 @@ html[data-challenge="pending"] .setup-only {
   transform-box: fill-box;
   transform-origin: center;
   animation: map-ring var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
-}
-
-.source-note {
-  margin: 0;
-  padding-left: var(--space-4);
-  font-size: var(--step--1);
-  color: var(--ink-soft);
 }
 
 /* =====================================================================
@@ -2167,18 +2226,7 @@ html[data-challenge="pending"] .setup-only {
   }
 }
 
-/* Splash: the globe drops in, the signature pops, PLAY bounces, the tagline pulses, the dots hop. */
-@keyframes splash-drop {
-  from {
-    opacity: 0;
-    transform: translateY(-160px) scale(0.6);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
+/* Splash: the logo pops in, PLAY bounces, the tagline pulses, the dots hop. */
 @keyframes splash-sign-in {
   from {
     opacity: 0;
@@ -2470,7 +2518,7 @@ html[data-challenge="pending"] .setup-only {
     animation: none;
   }
 
-  .splash__stage[data-intro="landed"] .splash__signature {
+  .splash__signature {
     animation: clay-fade-in 120ms ease-out both;
   }
 
@@ -2496,7 +2544,8 @@ html[data-challenge="pending"] .setup-only {
 
   .hint,
   .map-named--popping,
-  .map-marker--named {
+  .map-marker--named,
+  .map-marker--missed {
     animation: clay-fade-in 120ms ease-out both;
   }
 

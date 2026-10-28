@@ -53,19 +53,6 @@ export function seededRandom(key: string): () => number {
   return mulberry32(hashString(`${DAILY_SALT}:${key}`));
 }
 
-/**
- * What the Daily Challenge is drawn from: the bundled snapshot's sovereign
- * states, never the live API. Live data is refetched daily and can fall back to
- * the snapshot, so two players on the same date could otherwise draw from
- * different border lists. Sorted by code.
- */
-export type DailySource = readonly { code: string; region: string; borders: readonly string[] }[];
-
-/** The countries of a continent in the daily source, limited to codes the game can play. */
-export function dailyTargets(source: DailySource, continent: string, playable: ReadonlySet<string>): string[] {
-  return source.filter((c) => c.region === continent && playable.has(c.code)).map((c) => c.code);
-}
-
 export type DailyChallenge<C extends string> =
   | { date: string; kind: "pathfinding"; puzzle: RoutePuzzle }
   | { date: string; kind: "continent"; continent: C };
@@ -73,6 +60,11 @@ export type DailyChallenge<C extends string> =
 /**
  * Today's challenge: a Pathfinding route on about half of days, otherwise
  * naming every country in one continent.
+ *
+ * The same date and border data always give the same challenge, whatever order the
+ * countries are listed in (routes are picked from sorted codes). Every player gets the
+ * same data, the bundled countries.json, so every player gets the same puzzle; updating
+ * that file (npm run snapshot) and redeploying can change future dailies.
  */
 export function dailyChallenge<C extends string>(
   date: string,

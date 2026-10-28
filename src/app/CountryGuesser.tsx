@@ -11,10 +11,10 @@ import Timer, { formatElapsed } from "@/components/game/Timer";
 import ClayButton from "@/components/ui/ClayButton";
 import ClayCard from "@/components/ui/ClayCard";
 import ClayInput, { type ClayInputOption } from "@/components/ui/ClayInput";
-import type { CountrySource, EmpireKey, EmpireRound } from "@/data/loadCountries";
-import SplashScreen, { SPLASH_EXIT_MS, type BrandAssets } from "@/components/game/SplashScreen";
+import type { EmpireKey, EmpireRound } from "@/data/loadCountries";
+import SplashScreen, { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
 import { getSetting, initDb, saveRound, setSetting, type RoundRecord } from "@/utils/db";
-import { dailyChallenge, dailyTargets, dateKey, type DailySource } from "@/utils/dailySeed";
+import { dailyChallenge, dateKey } from "@/utils/dailySeed";
 import {
   answerForInput,
   answerLabel,
@@ -39,6 +39,7 @@ import {
   type RoutePuzzle,
 } from "@/utils/pathfinding";
 import { BRAND_NAME, buildShareText, paceGrid, routeGrid } from "@/utils/share";
+import { hapticsUseful, vibrate } from "@/utils/haptics";
 
 // The map (d3-geo + outline data, ~60 KB gzipped) loads in its own chunk, fetched
 // while the player is still on the setup screen.
@@ -46,7 +47,6 @@ const loadSvgMap = () => import("@/components/game/SvgMap");
 const SvgMap = lazy(loadSvgMap);
 /** What the splash screen's PLAY waits for: the profile database open, the map data loaded. */
 const prepareGame = () => Promise.allSettled([loadSvgMap(), initDb()]);
-const NO_BRAND: BrandAssets = { splashLogo: null, introVideo: null, introGif: null };
 /** The header logo: a transparent PNG in /public. */
 export const LOGO_SRC = "/logo.png";
 
@@ -106,6 +106,7 @@ const NO_OPTIONS: ClayInputOption[] = [];
 /** IndexedDB settings keys: the autocomplete toggle, and Countries/Capitals on the setup screen. */
 const SUGGESTIONS_SETTING = "suggestions";
 const ANSWER_SETTING = "answer";
+const HAPTICS_SETTING = "haptics";
 
 /* ------------------------------------------------------------------ */
 /* Game session state                                                  */
@@ -154,11 +155,6 @@ export type Session = {
   daily: string | null;
   /** Pathfinding only: every country stepped to, in order, steps back included. */
   path: string[];
-  /**
-   * Pathfinding only: which border data the route is played on. Daily routes (and their
-   * replays) use the bundled snapshot, so moves and the share grid are the same for everyone.
-   */
-  borders: "live" | "snapshot";
   /** Pathfinding only: the route came from a challenge link (?route=FRA-CHN). */
   challenge: boolean;
 };
@@ -180,7 +176,6 @@ export type SessionAction =
       type: "startRoute";
       puzzle: RoutePuzzle;
       daily?: string | null;
-      borders?: "live" | "snapshot";
       challenge?: boolean;
     }
   /** A step to a country bordering the current one. `complete`: the route now touches the end. */
@@ -208,7 +203,6 @@ export const initialSession: Session = {
   answer: "countries",
   daily: null,
   path: [],
-  borders: "live",
   challenge: false,
 };
 
@@ -255,7 +249,6 @@ export function sessionReducer(state: Session, action: SessionAction): Session {
         mode: "pathfinding",
         route: action.puzzle,
         daily: action.daily ?? null,
-        borders: action.borders ?? "live",
         challenge: action.challenge ?? false,
         status: "playing",
         round: state.round + 1,
@@ -293,6 +286,21 @@ export function sessionReducer(state: Session, action: SessionAction): Session {
  * to the nearest boundary render on the client only, and the rest of the page should stay
  * in the prerendered HTML.
  */
+/** A phone with vibration marks; struck through when vibration is off. Decorative: the button carries the name. */
+function VibrationIcon({ off }: { off: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" className="haptics-toggle__icon">
+      <rect x="8" y="4" width="8" height="16" rx="2.2" />
+      <path d="M11 17h2" />
+      {off ? (
+        <path d="M4 4l16 16" className="haptics-toggle__slash" />
+      ) : (
+        <path d="M4.5 9v6M2 10.5v3M19.5 9v6M22 10.5v3" />
+      )}
+    </svg>
+  );
+}
+
 function RouteChallengeParam({ onRoute }: { onRoute: (raw: string) => void }) {
   const raw = useSearchParams()?.get("route") ?? null;
   const handled = useRef<string | null>(null);
@@ -317,13 +325,9 @@ export const TYPO_ACCEPT_DELAY_MS = 700;
 
 type Feedback = { tone: "ok" | "warn" | "error" | "hint"; text: string } | null;
 type Props = {
+  /** The 195 sovereign states, from the bundled countries.json (the app's only country data). */
   countries: Country[];
   empires: EmpireRound[];
-  source: CountrySource;
-  /** Bundled-snapshot borders and continents: the only data the Daily Challenge is drawn from. */
-  dailySource: DailySource;
-  /** Splash files (full logo, boot-up animation) found in /public. */
-  brand?: BrandAssets;
   /** The boot-up splash (on by default). Challenge links skip it either way. */
   showSplash?: boolean;
 };
@@ -331,13 +335,18 @@ type Props = {
 export default function CountryGuesser({
   countries,
   empires,
-  source,
-  dailySource,
-  brand = NO_BRAND,
   showSplash = true,
 }: Props) {
   // Boot-up splash: "open" (the game behind is inert), "leaving" (exit playing, game live), "gone".
   const [splash, setSplash] = useState<"open" | "leaving" | "gone">(showSplash ? "open" : "gone");
+  // Haptics: a short buzz on PLAY, on a map tap that shows something, and on finishing a route.
+  // On by default; the header toggle (shown only where vibration can work) turns it off for good.
+  const [hapticsOn, setHapticsOn] = useState(true);
+  const [hapticsOffered, setHapticsOffered] = useState(false);
+  const hapticsRef = useRef(true); // read by stable callbacks
+  const buzz = useCallback(() => {
+    if (hapticsRef.current) vibrate();
+  }, []);
   const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (splash === "leaving") {
@@ -418,8 +427,6 @@ export default function CountryGuesser({
 
   const regions = useMemo(() => Object.fromEntries(countries.map((c) => [c.code, c.region])), [countries]);
   const graph = useMemo(() => buildBorderGraph(countries), [countries]);
-  // The Daily Challenge never touches the live list's borders.
-  const dailyGraph = useMemo(() => buildBorderGraph(dailySource), [dailySource]);
   const allCodes = useMemo(() => countries.map((c) => c.code), [countries]);
   const playable = useMemo(() => new Set(allCodes), [allCodes]);
 
@@ -436,12 +443,7 @@ export default function CountryGuesser({
   const isRoute = session.mode === "pathfinding" && route !== null;
   const here = route ? currentCountry(route, guesses.map((g) => g.country.code)) : null;
   const hereName = here ? index.byCode.get(here)!.name : "";
-  // The border data this route is played on: live, or the snapshot for the Daily Challenge.
-  const routeGraph = session.borders === "snapshot" ? dailyGraph : graph;
-  const routeScope = useMemo(
-    () => (here ? (routeGraph.get(here) ?? new Set<string>()) : new Set<string>()),
-    [routeGraph, here],
-  );
+  const routeScope = useMemo(() => (here ? (graph.get(here) ?? new Set<string>()) : new Set<string>()), [graph, here]);
   // What the shared matcher should accept right now. Route steps may revisit countries, so nothing counts as "named".
   const scope = isRoute ? routeScope : targetSet;
   const alreadyNamed = isRoute ? NOTHING_NAMED : namedSet;
@@ -469,6 +471,13 @@ export default function CountryGuesser({
     void getSetting<AnswerKind>(ANSWER_SETTING, "countries").then((answer) => {
       if (live && answer === "capitals") setAnswerSetting("capitals");
     });
+    setHapticsOffered(hapticsUseful());
+    void getSetting(HAPTICS_SETTING, true).then((on) => {
+      if (live && !on) {
+        hapticsRef.current = false;
+        setHapticsOn(false);
+      }
+    });
     return () => {
       live = false;
     };
@@ -479,7 +488,15 @@ export default function CountryGuesser({
     void setSetting(ANSWER_SETTING, answer);
   }
 
-  const daily = useMemo(() => (today ? dailyChallenge(today, dailyGraph, CONTINENTS) : null), [today, dailyGraph]);
+  const daily = useMemo(() => (today ? dailyChallenge(today, graph, CONTINENTS) : null), [today, graph]);
+
+  function toggleHaptics() {
+    const next = !hapticsOn;
+    hapticsRef.current = next;
+    setHapticsOn(next);
+    void setSetting(HAPTICS_SETTING, next);
+    if (next) vibrate(); // one buzz to show it's back on
+  }
 
   function toggleSuggestions() {
     const next = !suggestionsOn;
@@ -556,14 +573,9 @@ export default function CountryGuesser({
     startedAt.current = Date.now();
   }
 
-  function startRoute(
-    puzzle = pickRoute(graph),
-    dailyDate: string | null = null,
-    borders: "live" | "snapshot" = "live",
-    challenge = false,
-  ) {
+  function startRoute(puzzle = pickRoute(graph), dailyDate: string | null = null, challenge = false) {
     if (!puzzle) return;
-    dispatch({ type: "startRoute", puzzle, daily: dailyDate, borders, challenge });
+    dispatch({ type: "startRoute", puzzle, daily: dailyDate, challenge });
     setSetupMode("pathfinding");
     beginRound();
   }
@@ -581,9 +593,9 @@ export default function CountryGuesser({
   }
 
   /**
-   * A challenge link (?route=FRA-CHN): skip the setup screen and start that route, played on
-   * the bundled snapshot's borders like the Daily Challenge, so every phone that taps the same
-   * tag plays the same puzzle. A bad link falls back to the setup screen with the reason.
+   * A challenge link (?route=FRA-CHN): skip the setup screen and start that route. Every phone
+   * plays it on the same bundled border data, so it's the same puzzle for everyone. A bad link
+   * falls back to the setup screen with the reason.
    */
   function openChallenge(raw: string) {
     // A scanned challenge goes straight in: no boot-up splash in the way.
@@ -591,24 +603,23 @@ export default function CountryGuesser({
     // Drop the parameter so a reload or "Choose another round" doesn't relaunch it.
     window.history.replaceState(window.history.state, "", window.location.pathname + window.location.hash);
     document.documentElement.removeAttribute("data-challenge");
-    const result = parseRouteParam(raw, dailyGraph, (code) => countryIndex.byCode.get(code)?.name);
+    const result = parseRouteParam(raw, graph, (code) => countryIndex.byCode.get(code)?.name);
     if (!result.ok) {
       setChallengeNotice(result.reason);
       return;
     }
     if (status === "playing") return; // never interrupt a round in progress
-    startRoute(result.puzzle, null, "snapshot", true);
+    startRoute(result.puzzle, null, true);
   }
 
   /** Today's seeded puzzle. A replay plays the same puzzle as an ordinary round, so only the first try is the daily result. */
   function startDaily(replay: boolean) {
     const date = dateKey(); // re-read: the setup screen may have been open since yesterday
     setToday(date);
-    // Drawn and played on the bundled snapshot only, never on live data.
-    const challenge = dailyChallenge(date, dailyGraph, CONTINENTS);
+    const challenge = dailyChallenge(date, graph, CONTINENTS);
     const dailyDate = replay ? null : date;
-    if (challenge.kind === "pathfinding") startRoute(challenge.puzzle, dailyDate, "snapshot");
-    else start(challenge.continent, "countries", dailyDate, dailyTargets(dailySource, challenge.continent, playable));
+    if (challenge.kind === "pathfinding") startRoute(challenge.puzzle, dailyDate);
+    else start(challenge.continent, "countries", dailyDate);
   }
 
   function accept(
@@ -631,7 +642,9 @@ export default function CountryGuesser({
     const guess: Guess = { country, typed, distance, label, at: Date.now() - startedAt.current, hinted, picked };
     if (isRoute && route) {
       const stepsBack = country.code === route.start || namedSet.has(country.code);
-      dispatch({ type: "step", guess, complete: reachesEnd(routeGraph, route, country.code) });
+      const complete = reachesEnd(graph, route, country.code);
+      dispatch({ type: "step", guess, complete });
+      if (complete) buzz(); // route finished
       say("ok", stepsBack ? `Back to ${country.name}.` : recognized);
     } else {
       dispatch({ type: "guess", guess });
@@ -766,7 +779,7 @@ export default function CountryGuesser({
         title: session.challenge ? "Pathfinding Challenge" : "Pathfinding",
         moves: session.moves,
         par: session.route.par,
-        grid: routeGrid(session.borders === "snapshot" ? dailyGraph : graph, session.route, session.path),
+        grid: routeGrid(graph, session.route, session.path),
       });
     }
     if (!current) return null;
@@ -783,7 +796,7 @@ export default function CountryGuesser({
         session.targetCodes.length,
       ),
     });
-  }, [isOver, session, graph, dailyGraph, current, isCapitals]);
+  }, [isOver, session, graph, current, isCapitals]);
 
   // Save each finished round to the local profile, once the Timer has reported the final time.
   const savedRound = useRef(0);
@@ -850,6 +863,12 @@ export default function CountryGuesser({
   // Pathfinding map: framed around one shortest route; start and end always shown.
   const routeFrame = useMemo(() => (route ? { around: route.shortest } : null), [route]);
   const won = status === "won";
+  // Given up: the countries of one shortest route the player never stepped into, shown in red.
+  const routeMissed = useMemo(
+    () =>
+      route && status === "forfeited" ? new Set(route.shortest.slice(1, -1).filter((code) => !namedSet.has(code))) : null,
+    [route, status, namedSet],
+  );
   const routeEndpoints = useMemo(
     () =>
       route
@@ -890,6 +909,7 @@ export default function CountryGuesser({
       setMapTap(null);
       return;
     }
+    buzz(); // a country that shows something (its initials, or its name)
     const rect = stage.getBoundingClientRect();
     setMapTap((prev) => ({
       code,
@@ -898,7 +918,7 @@ export default function CountryGuesser({
       ...tapContext.current,
       taps: (prev?.taps ?? 0) + 1,
     }));
-  }, []);
+  }, [buzz]);
 
   /** What a tap on this country reveals right now, or null if nothing. */
   function mapTipFor(code: string): { title: string; detail?: string; announce: string } | null {
@@ -1003,22 +1023,45 @@ export default function CountryGuesser({
   return (
     <>
       {splash !== "gone" && (
-        <SplashScreen assets={brand} prepare={prepareGame} leaving={splash === "leaving"} onPlay={() => setSplash("leaving")} />
+        <SplashScreen
+          prepare={prepareGame}
+          leaving={splash === "leaving"}
+          onPlay={() => {
+            buzz();
+            setSplash("leaving");
+          }}
+        />
       )}
 
       {/* While the splash is up, the game is inert: no focus, hidden from screen readers. */}
       <div className="game-shell" inert={splash === "open" || undefined}>
       <header className="game-header">
-        {status === "setup" ? (
-          <div className="game-heading">
+        {/* The logo, with the vibration toggle at the far right of its row. */}
+        <div className="brand-row">
+          {status === "setup" ? (
             <h1 className="game-title brand-title" ref={titleRef} tabIndex={-1}>
               {logo}
             </h1>
-            <p className="game-tagline">{answerSetting === "capitals" ? "Name every capital." : "Name every country."}</p>
-          </div>
+          ) : (
+            logo
+          )}
+          {hapticsOffered && (
+            <button
+              type="button"
+              className="haptics-toggle"
+              aria-label="Vibration"
+              aria-pressed={hapticsOn}
+              title={hapticsOn ? "Vibration on" : "Vibration off"}
+              onClick={toggleHaptics}
+            >
+              <VibrationIcon off={!hapticsOn} />
+            </button>
+          )}
+        </div>
+        {status === "setup" ? (
+          <p className="game-tagline">{answerSetting === "capitals" ? "Name every capital." : "Name every country."}</p>
         ) : (
           <div className="game-heading">
-            {logo}
             <h1 className="game-title">
               {isRoute && route ? `${nameOf(route.start)} to ${nameOf(route.end)}` : roundTitle}
               {session.daily && <span className="daily-badge">Daily</span>}
@@ -1251,9 +1294,12 @@ export default function CountryGuesser({
                   {suggestionsOn ? "On" : "Off"}
                 </span>
               </ClayButton>
-              <ClayButton variant="soft" size="sm" onClick={() => dispatch({ type: "forfeit" })}>
-                Forfeit
-              </ClayButton>
+              {/* Routes have Give Up under the map instead. */}
+              {!isRoute && (
+                <ClayButton variant="soft" size="sm" onClick={() => dispatch({ type: "forfeit" })}>
+                  Forfeit
+                </ClayButton>
+              )}
             </div>
           </div>
         </ClayCard>
@@ -1291,14 +1337,20 @@ export default function CountryGuesser({
             ))}
           </ol>
           {shareText && <ShareResult text={shareText} />}
-          {challengeLink && (
-            <div className="qr-share">
-              <ClayButton variant="soft" aria-haspopup="dialog" onClick={() => setQrRound(session.round)}>
-                Share via QR
+          {/* Straight on to another route, no menu; or share this one. */}
+          <div className="route-next">
+            <div className="route-next__buttons">
+              <ClayButton className="route-next__new" onClick={() => startRoute()}>
+                Generate New Route
               </ClayButton>
-              <p className="qr-share__note">Another phone scans it to play this exact route.</p>
+              {challengeLink && (
+                <ClayButton variant="soft" aria-haspopup="dialog" onClick={() => setQrRound(session.round)}>
+                  Share via QR
+                </ClayButton>
+              )}
             </div>
-          )}
+            {challengeLink && <p className="qr-share__note">Another phone scans the QR code to play this exact route.</p>}
+          </div>
           {qrOpen && (
             <Suspense fallback={null}>
               <QrShareModal url={challengeLink} routeName={`${nameOf(route.start)} to ${nameOf(route.end)}`} onClose={closeQr} />
@@ -1306,11 +1358,10 @@ export default function CountryGuesser({
           )}
           <div className="result-actions">
             {session.challenge && (
-              <ClayButton onClick={() => startRoute(route, null, "snapshot", true)}>Play this route again</ClayButton>
+              <ClayButton variant="soft" onClick={() => startRoute(route, null, true)}>
+                Play this route again
+              </ClayButton>
             )}
-            <ClayButton variant={session.challenge ? "soft" : "primary"} onClick={() => startRoute()}>
-              New route
-            </ClayButton>
             <ClayButton variant="soft" onClick={() => dispatch({ type: "reset" })}>
               Choose another round
             </ClayButton>
@@ -1365,15 +1416,29 @@ export default function CountryGuesser({
                 named={namedSet}
                 highlight={null}
                 endpoints={routeEndpoints}
-                description={`Map of the route from ${nameOf(route.start)} to ${nameOf(route.end)}: ${guesses.length} ${guesses.length === 1 ? "country" : "countries"} on the route so far.`}
+                description={`Map of the route from ${nameOf(route.start)} to ${nameOf(route.end)}: ${guesses.length} ${guesses.length === 1 ? "country" : "countries"} on the route so far.${routeMissed ? ` In red, the ${routeMissed.size} ${routeMissed.size === 1 ? "country" : "countries"} of one shortest route you didn't reach.` : ""}`}
                 clickable={mapClickable}
                 onCountryClick={onMapClick}
                 selected={tip ? mapTap?.code : null}
+                missed={routeMissed}
               />
             </Suspense>
             {mapOverlay}
           </div>
+          {routeMissed && routeMissed.size > 0 && (
+            <p className="map-note map-note--missed">
+              <span className="map-key map-key--missed" aria-hidden="true" />
+              In red: the rest of one shortest route.
+            </p>
+          )}
           {mapNote && <p className="map-note">{mapNote}</p>}
+          {isPlaying && (
+            <div className="give-up-row">
+              <ClayButton variant="soft" size="sm" className="give-up" onClick={() => dispatch({ type: "forfeit" })}>
+                Give Up
+              </ClayButton>
+            </div>
+          )}
         </ClayCard>
       )}
 
@@ -1447,11 +1512,6 @@ export default function CountryGuesser({
         </ClayCard>
       )}
 
-      <p className="source-note">
-        {source === "rest-countries"
-          ? "Country list from REST Countries, refreshed daily."
-          : "Country list from the bundled snapshot (REST Countries didn't respond)."}
-      </p>
       </div>
     </>
   );

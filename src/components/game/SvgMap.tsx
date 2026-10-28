@@ -224,6 +224,11 @@ type SvgMapProps = {
   onCountryClick?: (code: string | null, at: { clientX: number; clientY: number }) => void;
   /** Outline this country (the one a tooltip is about). */
   selected?: string | null;
+  /**
+   * Countries to show in red, popping in like named ones: a forfeited route's unvisited
+   * shortest-route countries. Ignored for named countries. Must be a stable Set.
+   */
+  missed?: ReadonlySet<string> | null;
 };
 
 /** Clay depth for SVG: outer drop shadow + light top-left inner edge + dark bottom-right inner edge. */
@@ -289,12 +294,14 @@ function SvgMap({
   clickable = null,
   onCountryClick,
   selected = null,
+  missed = null,
 }: SvgMapProps) {
   const geometry = useMemo(() => buildMapGeometry(frame, targets), [frame, targets]);
   // In themed rounds the whole map shares one color; in World Mode each country uses its continent's.
   const regionOf = (code: string) => (theme ? undefined : regions[code]);
   const targetSet = useMemo(() => new Set(targets), [targets]);
   const namedInOrder = targets.filter((code) => named.has(code));
+  const missedInOrder = missed ? targets.filter((code) => missed.has(code) && !named.has(code)) : [];
   const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set());
   const settle = (code: string) => (e: AnimationEvent<SVGPathElement>) => {
     const running = (e.currentTarget.getAnimations?.() ?? []).some((a) => a.playState !== "finished");
@@ -378,6 +385,13 @@ function SvgMap({
             />
           );
         })}
+        {missedInOrder.map((code) => {
+          const t = geometry.targets.get(code);
+          if (!t?.d || !settled.has(code)) return null;
+          return (
+            <path key={`missed-${code}`} d={t.d} data-code={code} data-clickable={canClick(code)} className="map-named map-named--missed" />
+          );
+        })}
       </g>
 
       <g>
@@ -391,6 +405,20 @@ function SvgMap({
               data-code={code}
               data-region={regionOf(code)}
               className="map-named map-named--popping"
+              style={{ transformOrigin: `${t.origin[0]}px ${t.origin[1]}px` }}
+              onAnimationEnd={settle(code)}
+            />
+          );
+        })}
+        {missedInOrder.map((code) => {
+          const t = geometry.targets.get(code);
+          if (!t?.d || settled.has(code)) return null;
+          return (
+            <path
+              key={`missed-${code}`}
+              d={t.d}
+              data-code={code}
+              className="map-named map-named--missed map-named--popping"
               style={{ transformOrigin: `${t.origin[0]}px ${t.origin[1]}px` }}
               onAnimationEnd={settle(code)}
             />
@@ -418,16 +446,19 @@ function SvgMap({
               </circle>
             );
           }
+          const isMissed = !named.has(code) && missed?.has(code);
           return (
             <circle
-              key={named.has(code) ? `${code}-named` : code}
+              key={named.has(code) ? `${code}-named` : isMissed ? `${code}-missed` : code}
               cx={t.marker[0]}
               cy={t.marker[1]}
               r={geometry.markerRadius}
               data-code={code}
               data-clickable={canClick(code)}
               data-region={named.has(code) ? regionOf(code) : undefined}
-              className={named.has(code) ? "map-marker map-marker--named" : "map-marker"}
+              className={
+                named.has(code) ? "map-marker map-marker--named" : isMissed ? "map-marker map-marker--missed" : "map-marker"
+              }
             />
           );
         })}

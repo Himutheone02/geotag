@@ -7,7 +7,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import snapshot from "@/data/countries.json";
-import { getDailySource, resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
+import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import { getSetting, listRounds, resetDbConnection, saveRound, type RoundRecord } from "@/utils/db";
 import CountryGuesser from "./CountryGuesser";
 
@@ -15,7 +15,6 @@ import CountryGuesser from "./CountryGuesser";
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
 const empires = resolveEmpires(countries);
-const dailySource = getDailySource();
 let container: HTMLDivElement;
 let root: Root;
 
@@ -23,7 +22,7 @@ function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
 }
 
 function unmount() {
@@ -321,5 +320,27 @@ describe("Profile & Stats tab", () => {
     resetDbConnection();
     await openProfile();
     expect($(".profile .empty")!.textContent).toMatch(/^This browser isn't letting the game store anything/);
+  });
+});
+
+describe("vibration setting", () => {
+  afterEach(() => {
+    delete (navigator as { vibrate?: unknown }).vibrate;
+    window.matchMedia = originalMatchMedia;
+  });
+  const originalMatchMedia = window.matchMedia;
+
+  it("is remembered: turned off, it stays off next visit", async () => {
+    Object.defineProperty(navigator, "vibrate", { value: () => true, configurable: true, writable: true });
+    window.matchMedia = ((query: string) => ({ matches: query === "(pointer: coarse)", media: query })) as typeof window.matchMedia;
+    unmount();
+    mount();
+    const toggle = () => $<HTMLButtonElement>(".haptics-toggle")!;
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    act(() => toggle().click());
+    await eventually(async () => expect(await getSetting("haptics", true)).toBe(false));
+    unmount();
+    mount();
+    await eventually(() => expect(toggle().getAttribute("aria-pressed")).toBe("false"));
   });
 });

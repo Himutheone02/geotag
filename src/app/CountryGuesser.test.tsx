@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
-import { getDailySource, resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
+import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, type Guess } from "./CountryGuesser";
 import { buildBorderGraph, pickRoute } from "@/utils/pathfinding";
 import { dailyChallenge, dateKey } from "@/utils/dailySeed";
@@ -31,7 +31,6 @@ vi.mock("@/components/ui/ClayCard", async (importOriginal) => {
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
 const empires = resolveEmpires(countries);
-const dailySource = getDailySource();
 const inRegion = (r: string) => countries.filter((c) => c.region === r);
 let container: HTMLDivElement;
 let root: Root;
@@ -41,7 +40,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
 });
 
 afterEach(() => {
@@ -431,16 +430,58 @@ describe("Pathfinding", () => {
     for (const code of puzzle.shortest.slice(1, -1)) expect($(`.map-named[data-code="${code}"]`)).not.toBeNull();
   });
 
-  it("forfeit shows one shortest route, and New route starts another", () => {
+  it("has Give Up under the map instead of Forfeit, only while the route is on", () => {
     clickButton("Start");
-    clickButton("Forfeit");
+    const buttons = () => [...container.querySelectorAll("button")].map((b) => b.textContent);
+    expect(buttons()).not.toContain("Forfeit");
+    const giveUp = [...container.querySelectorAll<HTMLButtonElement>(".map-card button")].find((b) => b.textContent === "Give Up")!;
+    expect(giveUp.classList.contains("give-up")).toBe(true);
+    clickButton("Give Up");
+    expect(buttons()).not.toContain("Give Up");
+  });
+
+  it("Give Up stops the clock and ends the route, showing one shortest route", () => {
+    clickButton("Start");
+    wait(5_000);
+    clickButton("Give Up");
     expect($("#result-heading")!.textContent).toBe("Route abandoned");
+    const stopped = timer();
+    expect(stopped).toBe("00:05");
+    wait(10_000);
+    expect(timer()).toBe(stopped);
     expect([...container.querySelectorAll('[aria-label="One shortest route"] .chip-name')].map((e) => e.textContent)).toEqual(
       puzzle.shortest.slice(1, -1).map(name),
     );
-    clickButton("New route");
+    expect($("input")).toBeNull();
+  });
+
+  it("Give Up shows the route's unreached countries in red on the map", async () => {
+    clickButton("Start");
+    await loadMap();
+    step(puzzle.shortest[1]); // one step along the shortest route
+    expect(container.querySelector(".map-named--missed, .map-marker--missed")).toBeNull();
+    clickButton("Give Up");
+    const red = (code: string) => container.querySelector(`.map-named--missed[data-code="${code}"], .map-marker--missed[data-code="${code}"]`);
+    const rest = puzzle.shortest.slice(2, -1);
+    for (const code of rest) expect(red(code)).not.toBeNull();
+    expect(red(puzzle.shortest[1])).toBeNull(); // reached: not red
+    expect($(".map-note--missed")!.textContent).toBe("In red: the rest of one shortest route.");
+    expect($(".world-map")!.getAttribute("aria-label")).toMatch(
+      new RegExp(`In red, the ${rest.length} countr(y|ies) of one shortest route you didn't reach\\.$`),
+    );
+  });
+
+  it("Generate New Route, next to Share via QR, starts another route straight away", () => {
+    clickButton("Start");
+    clickButton("Give Up");
+    const row = [...container.querySelectorAll(".route-next__buttons button")].map((b) => b.textContent);
+    expect(row).toEqual(["Generate New Route", "Share via QR"]);
+    expect(container.textContent).not.toContain("New route");
+    clickButton("Generate New Route");
+    expect($("#setup-heading")).toBeNull(); // no trip back to the menu
     expect(moves()).toBe("0 moves");
     expect(timer()).toBe("00:00");
+    expect($<HTMLInputElement>("input")).not.toBeNull();
   });
 });
 
@@ -644,7 +685,7 @@ describe("Daily Challenge", () => {
     const [y, m, d] = date.split("-").map(Number);
     vi.setSystemTime(new Date(y, m - 1, d, 12));
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
   }
   async function play() {
     await act(async () => {}); // the card checks the profile for today's result
@@ -693,69 +734,21 @@ describe("Daily Challenge", () => {
     openOn(date);
     await play();
     wait(72_000);
-    clickButton("Forfeit");
+    clickButton("Give Up");
     const text = $(".share-preview")!.textContent!;
     expect(text.split("\n")).toEqual([`geotag - Daily Pathfinding ${date}`, "🗺️ 🏳️ gave up after 0 moves ⏱️ 01:12"]);
     for (const c of countries) expect(text).not.toContain(c.name);
   });
 });
 
-describe("Daily Challenge uses only the bundled snapshot", () => {
-  const snapshotGraph = buildBorderGraph(dailySource);
-  // "Live" data that disagrees with the snapshot: no borders at all, and France moved to Asia.
-  const live = countries.map((c) => ({ ...c, borders: [], region: c.code === "FRA" ? "Asia" : c.region }));
-  function openLiveOn(date: string) {
-    act(() => root.unmount());
-    const [y, m, d] = date.split("-").map(Number);
-    vi.setSystemTime(new Date(y, m - 1, d, 12));
-    root = createRoot(container);
-    act(() =>
-      root.render(<CountryGuesser countries={live} empires={empires} source="rest-countries" dailySource={dailySource} showSplash={false} />),
-    );
-  }
-  function dateWith(kind: "pathfinding" | "continent", pred: (c: ReturnType<typeof dailyChallenge<string>>) => boolean = () => true) {
-    for (let i = 0; ; i++) {
-      const date = dateKey(new Date(2026, 9, 1 + i));
-      const c = dailyChallenge(date, snapshotGraph, CONTINENTS);
-      if (c.kind === kind && pred(c)) return date;
-    }
-  }
-  const nameOf = (code: string) => byCode.get(code)!.name;
-
-  it("draws and plays the route on snapshot borders, even when live data has none", async () => {
-    const date = dateWith("pathfinding");
-    const challenge = dailyChallenge(date, snapshotGraph, CONTINENTS);
-    if (challenge.kind !== "pathfinding") throw new Error("unreachable");
-    openLiveOn(date);
-    await act(async () => {});
-    clickButton("Play today's challenge");
-    expect($("h1")!.textContent).toBe(`${nameOf(challenge.puzzle.start)} to ${nameOf(challenge.puzzle.end)}Daily`);
-    // Walk the shortest route: every step is a snapshot border, none exist in the live data.
-    for (const code of challenge.puzzle.shortest.slice(1, -1)) typeKeys(nameOf(code));
-    expect($("#result-heading")!.textContent).toBe(`You reached ${nameOf(challenge.puzzle.end)}`);
-    expect($(".share-preview")!.textContent!.split("\n")[2]).toBe("🟩".repeat(challenge.puzzle.par));
-  });
-
-  it("takes a continent's countries from the snapshot, not the live regions", async () => {
-    const date = dateWith("continent", (c) => c.kind === "continent" && c.continent === "Europe");
-    openLiveOn(date);
-    await act(async () => {});
-    clickButton("Play today's challenge");
-    expect($("h1")!.textContent).toBe("EuropeDaily");
-    expect(counter()).toBe("0 / 45"); // France included, as in the snapshot
-  });
-});
-
 describe("challenge links (?route=)", () => {
   /** Remounts the game as if opened from a link with this query string. */
-  function openLink(query: string, live = countries) {
+  function openLink(query: string) {
     act(() => root.unmount());
     search.params = new URLSearchParams(query);
     window.history.replaceState(null, "", `/?${query}`);
     root = createRoot(container);
-    act(() =>
-      root.render(<CountryGuesser countries={live} empires={empires} source="snapshot" dailySource={dailySource} showSplash={false} />),
-    );
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
   }
   afterEach(() => {
     search.params = new URLSearchParams();
@@ -776,9 +769,8 @@ describe("challenge links (?route=)", () => {
     expect($("h1")!.textContent).toBe("Portugal to Poland");
   });
 
-  it("plays the route on the bundled snapshot's borders, like the Daily Challenge", () => {
-    const live = countries.map((c) => ({ ...c, borders: [] }));
-    openLink("route=PRT-POL", live);
+  it("plays the linked route through to the end", () => {
+    openLink("route=PRT-POL");
     for (const name of ["Spain", "France", "Germany"]) typeKeys(name);
     expect($("#result-heading")!.textContent).toBe("You reached Poland");
   });
@@ -817,7 +809,7 @@ describe("challenge links (?route=)", () => {
 
   it("Share via QR opens a modal whose code holds the exact route link", async () => {
     openLink("route=FRA-CHN");
-    clickButton("Forfeit");
+    clickButton("Give Up");
     expect(container.textContent).not.toContain("Create NFC Challenge");
     await act(async () => {
       await import("@/components/game/QrShareModal");
@@ -837,7 +829,7 @@ describe("challenge links (?route=)", () => {
 
   it("the QR modal closes with its button, Escape or a backdrop click, after a short exit", async () => {
     openLink("route=FRA-CHN");
-    clickButton("Forfeit");
+    clickButton("Give Up");
     await act(async () => {
       await import("@/components/game/QrShareModal");
     });
@@ -869,7 +861,7 @@ describe("challenge links (?route=)", () => {
 
   it("a challenge result offers to play the route again", () => {
     openLink("route=FRA-CHN");
-    clickButton("Forfeit");
+    clickButton("Give Up");
     expect($(".share-preview")!.textContent).toMatch(/^geotag - Pathfinding Challenge\n/);
     clickButton("Play this route again");
     expect($("h1")!.textContent).toBe("France to China");
@@ -878,7 +870,7 @@ describe("challenge links (?route=)", () => {
   it("random routes can be shared by QR too, and list rounds can't", () => {
     clickButton("Pathfinding");
     clickButton("Start");
-    clickButton("Forfeit");
+    clickButton("Give Up");
     expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Share via QR")).toBe(true);
     clickButton("Choose another round");
     clickButton("Continents");
@@ -1048,7 +1040,7 @@ describe("map taps", () => {
     clickButton("Start");
     await loadMap();
     expect(container.querySelector(".world-map [data-clickable]")).toBeNull();
-    clickButton("Forfeit");
+    clickButton("Give Up");
     const here = $(".map-endpoint--start")!.getAttribute("data-code")!;
     tapMap(here);
     expect(tooltip()).toBe(byCode.get(here)!.name);
@@ -1072,7 +1064,7 @@ describe("boot-up splash and logo", () => {
     act(() => root.unmount());
     root = createRoot(container);
     act(() =>
-      root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} {...props} />),
+      root.render(<CountryGuesser countries={countries} empires={empires} {...props} />),
     );
   }
   const shell = () => $(".game-shell")!;
@@ -1088,7 +1080,7 @@ describe("boot-up splash and logo", () => {
     mountWith({});
     expect($(".splash")).not.toBeNull();
     expect(shell().hasAttribute("inert")).toBe(true);
-    expect(document.activeElement).toBe(play());
+    expect(document.activeElement).toBe($("[role=dialog]")); // the dialog, not PLAY: no focus ring on load
     await ready();
     expect(play().getAttribute("data-ready")).toBe("true");
     act(() => play().click());
@@ -1106,7 +1098,7 @@ describe("boot-up splash and logo", () => {
     act(() => root.unmount());
     search.params = new URLSearchParams("route=PRT-POL");
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} source="snapshot" dailySource={dailySource} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} />));
     expect($(".splash")).toBeNull();
     expect(shell().hasAttribute("inert")).toBe(false);
     expect($("h1")!.textContent).toBe("Portugal to Poland");
@@ -1124,13 +1116,113 @@ describe("boot-up splash and logo", () => {
     // Nothing else in the heading: no wordmark, no clay badge around the logo.
     expect(heading.childElementCount).toBe(1);
     expect(heading.textContent).toBe("");
-    expect(heading.nextElementSibling!.textContent).toBe("Name every country.");
+    expect(heading.parentElement!.nextElementSibling!.textContent).toBe("Name every country.");
     clickButton("Europe");
-    const roundLogo = $<HTMLImageElement>(".game-heading > img.brand-logo")!;
+    const roundLogo = $<HTMLImageElement>(".brand-row > img.brand-logo")!;
     expect(roundLogo.getAttribute("src")).toBe("/logo.png");
-    expect(roundLogo.nextElementSibling!.tagName).toBe("H1");
-    expect($("h1")!.textContent).toBe("Europe");
+    expect(roundLogo.parentElement!.nextElementSibling!.querySelector("h1")!.textContent).toBe("Europe");
     expect($(".brand")).toBeNull();
+  });
+});
+
+describe("haptics", () => {
+  let buzz: ReturnType<typeof vi.fn<(pattern: number[]) => boolean>>;
+  const toggle = () => $<HTMLButtonElement>(".haptics-toggle");
+  /** Remounts on a device with (or without) the Vibration API and a touch-first pointer. */
+  function mountOn({ vibrate = true, coarse = true, splash = false } = {}) {
+    act(() => root.unmount());
+    buzz = vi.fn<(pattern: number[]) => boolean>(() => true);
+    if (vibrate) Object.defineProperty(navigator, "vibrate", { value: buzz, configurable: true, writable: true });
+    else delete (navigator as { vibrate?: unknown }).vibrate;
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) => ({ matches: coarse && query === "(pointer: coarse)", media: query }) as MediaQueryList,
+    );
+    root = createRoot(container);
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={splash} />));
+  }
+  afterEach(() => {
+    delete (navigator as { vibrate?: unknown }).vibrate;
+    vi.restoreAllMocks();
+  });
+
+  it("offers the toggle on a phone that can vibrate, not on an iPhone (no API) or a desktop (mouse)", () => {
+    mountOn();
+    expect(toggle()!.getAttribute("aria-label")).toBe("Vibration");
+    expect(toggle()!.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle()!.parentElement!.classList.contains("brand-row")).toBe(true); // beside the logo
+    mountOn({ vibrate: false });
+    expect(toggle()).toBeNull();
+    mountOn({ coarse: false });
+    expect(toggle()).toBeNull();
+  });
+
+  it("buzzes 30 ms on PLAY", async () => {
+    mountOn({ splash: true });
+    await act(async () => {
+      await import("@/components/game/SvgMap");
+    });
+    await act(async () => {});
+    act(() => $<HTMLButtonElement>(".splash-play")!.click());
+    expect(buzz).toHaveBeenCalledTimes(1);
+    expect(buzz).toHaveBeenCalledWith([30]);
+  });
+
+  it("buzzes on a map tap that shows a country, not on the sea", async () => {
+    mountOn();
+    clickButton("Oceania");
+    await loadMap();
+    clickButton("Forfeit");
+    act(() => {
+      $('.world-map [data-code="PNG"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(buzz).toHaveBeenCalledTimes(1);
+    act(() => {
+      $(".world-map")!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(buzz).toHaveBeenCalledTimes(1);
+  });
+
+  it("buzzes once when a route is completed, not on each step", () => {
+    mountOn();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const puzzle = pickRoute(buildBorderGraph(countries), { random: () => 0 })!;
+    clickButton("Pathfinding");
+    clickButton("Start");
+    const between = puzzle.shortest.slice(1, -1);
+    between.forEach((code, i) => {
+      typeKeys(byCode.get(code)!.name);
+      if ($<HTMLInputElement>("input")?.value) act(() => $<HTMLButtonElement>("button[type=submit]")!.click());
+      expect(buzz).toHaveBeenCalledTimes(i === between.length - 1 ? 1 : 0);
+    });
+    expect($("#result-heading")!.textContent).toBe(`You reached ${byCode.get(puzzle.end)!.name}`);
+  });
+
+  it("turned off, nothing buzzes; turned back on, one buzz says so", async () => {
+    mountOn();
+    act(() => toggle()!.click());
+    expect(toggle()!.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle()!.getAttribute("title")).toBe("Vibration off");
+    clickButton("Oceania");
+    await loadMap();
+    clickButton("Forfeit");
+    act(() => {
+      $('.world-map [data-code="PNG"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(buzz).not.toHaveBeenCalled();
+    act(() => toggle()!.click());
+    expect(toggle()!.getAttribute("aria-pressed")).toBe("true");
+    expect(buzz).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws where vibrate is missing", async () => {
+    mountOn({ vibrate: false });
+    clickButton("Oceania");
+    await loadMap();
+    clickButton("Forfeit");
+    act(() => {
+      $('.world-map [data-code="PNG"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect($(".map-tip")!.textContent).toBe("Papua New Guinea");
   });
 });
 

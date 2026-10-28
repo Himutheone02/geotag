@@ -1,14 +1,15 @@
 // Server-only module: imported by the page (a Server Component), never by client code.
+// The app's only country data is the bundled countries.json: nothing is fetched,
+// at build time or in the browser.
 import snapshot from "./countries.json";
 import historicalEmpires from "./historical_empires.json";
 import { buildIndex, normalize, type Country } from "@/utils/fuzzyMatch";
-import type { DailySource } from "@/utils/dailySeed";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Shape of a country as returned by REST Countries v3.1 (only the fields we request). */
+/** A country record in countries.json (REST Countries v3.1 field names; see scripts/snapshot.mjs). */
 export type RawCountry = {
   name: { common: string; official: string };
   cca3: string;
@@ -25,8 +26,6 @@ export type RawCountry = {
   latlng?: [number, number] | null;
 };
 
-export type CountrySource = "rest-countries" | "snapshot";
-
 /* ------------------------------------------------------------------ */
 /* Curated aliases                                                     */
 /* ------------------------------------------------------------------ */
@@ -36,7 +35,7 @@ export type CountrySource = "rest-countries" | "snapshot";
  *
  * Why this exists: Levenshtein distance only forgives typos. Names like
  * "Ivory Coast" vs "Côte d'Ivoire" or "Burma" vs "Myanmar" are far apart in
- * edit distance, so they must be listed explicitly. REST Countries'
+ * edit distance, so they must be listed explicitly. The data's
  * `altSpellings` covers some of these; this list fills the common gaps.
  *
  * Short aliases (3 characters or fewer after normalization) are matched
@@ -130,9 +129,8 @@ export const CAPITAL_ALIASES: Record<string, string[]> = {
  * Definition of "modern sovereign state" used by this app:
  * the 193 UN member states + the 2 UN observer states (Vatican City, Palestine) = 195.
  *
- * This is a policy choice, not a fact in the data. REST Countries returns ~250
- * entries including territories (Greenland, Puerto Rico, Hong Kong...), and its
- * `independent` flag disagrees with the UN list in a few places. Taiwan and
+ * This is a policy choice, not a fact in the data. countries.json has ~250
+ * entries including territories (Greenland, Puerto Rico, Hong Kong...). Taiwan and
  * Kosovo are excluded under this rule; add their cca3 codes here to include them.
  */
 export const UN_OBSERVER_STATES = new Set(["VAT", "PSE"]);
@@ -143,7 +141,7 @@ export function isSovereign(c: RawCountry): boolean {
 }
 
 /**
- * REST Countries `altSpellings` mixes real alternate names ("Deutschland",
+ * The data's `altSpellings` mixes real alternate names ("Deutschland",
  * "Ivory Coast") with ISO codes ("DE", "CI"). Two-letter codes are dropped:
  * accepting "in", "is", "no", "me" as answers would be absurd in a quiz.
  */
@@ -161,7 +159,7 @@ export function toCountry(raw: RawCountry): Country {
 
   const capitals = CAPITAL_OVERRIDES[raw.cca3] ?? (raw.capital ?? []).filter((c) => c.trim());
   const capitalAliases = (CAPITAL_ALIASES[raw.cca3] ?? []).filter((a) => !capitals.includes(a));
-  // Live data may still spell a capital the old way: keep whatever it says as an alias.
+  // The data may spell a capital the old way: keep whatever it says as an alias.
   for (const c of raw.capital ?? []) if (!capitals.includes(c) && !capitalAliases.includes(c)) capitalAliases.push(c);
 
   return {
@@ -184,69 +182,13 @@ export function toSovereignStates(raw: RawCountry[]): Country[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Basic shape check so a malformed API response never reaches the UI. */
-export function looksLikeCountryList(data: unknown): data is RawCountry[] {
-  return (
-    Array.isArray(data) &&
-    data.length >= 190 &&
-    data.every(
-      (c) =>
-        c &&
-        typeof c === "object" &&
-        typeof (c as RawCountry).cca3 === "string" &&
-        typeof (c as RawCountry).name?.common === "string",
-    )
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* REST Countries fetch with snapshot fallback                         */
-/* ------------------------------------------------------------------ */
-
 /**
- * REST Countries requires an explicit `fields` list on /all (max 10 fields),
- * otherwise it returns 400 Bad Request.
+ * All 195 sovereign states, from the bundled snapshot (countries.json), sorted by name.
+ * The page is built from this once; to update the data, run `npm run snapshot` (a
+ * maintenance script that pulls from REST Countries on your machine) and rebuild.
  */
-export const REST_COUNTRIES_URL =
-  "https://restcountries.com/v3.1/all?fields=" +
-  ["name", "cca3", "altSpellings", "region", "subregion", "unMember", "capital", "borders"].join(",");
-
-const ONE_DAY_SECONDS = 60 * 60 * 24;
-const FETCH_TIMEOUT_MS = 5000;
-
-export type CountryLoad = {
-  countries: Country[];
-  source: CountrySource;
-  error?: string;
-};
-
-/**
- * Loads all sovereign states.
- *
- * Primary: REST Countries, cached by Next.js for 24h (country lists change rarely).
- * Fallback: the bundled snapshot (countries.json), used whenever the API is down,
- * slow, or returns something malformed. The free hosted API has no SLA, so the
- * game must never depend on it being up.
- */
-export async function getSovereignStates(): Promise<CountryLoad> {
-  try {
-    const res = await fetch(REST_COUNTRIES_URL, {
-      next: { revalidate: ONE_DAY_SECONDS },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`REST Countries responded ${res.status}`);
-    const data: unknown = await res.json();
-    if (!looksLikeCountryList(data)) throw new Error("Unexpected response shape");
-    return { countries: toSovereignStates(data), source: "rest-countries" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[countries] Falling back to snapshot: ${message}`);
-    return {
-      countries: toSovereignStates(snapshot as RawCountry[]),
-      source: "snapshot",
-      error: message,
-    };
-  }
+export function getSovereignStates(): Country[] {
+  return toSovereignStates(snapshot as RawCountry[]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,15 +237,4 @@ export function resolveEmpires(countries: Country[]): EmpireRound[] {
     }
     return { key: empire.key, title: empire.title, era: empire.era, codes, excluded };
   });
-}
-
-/**
- * The Daily Challenge's data: codes, continents and borders of the 195
- * sovereign states from the bundled snapshot (countries.json), never from the
- * live API, so every player draws the same puzzle on the same date.
- */
-export function getDailySource(): DailySource {
-  return toSovereignStates(snapshot as RawCountry[])
-    .map(({ code, region, borders }) => ({ code, region, borders }))
-    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }

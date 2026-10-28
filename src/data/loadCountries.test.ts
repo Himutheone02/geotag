@@ -1,7 +1,9 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import snapshot from "./countries.json";
 import historicalEmpires from "./historical_empires.json";
-import { EMPIRES, getDailySource, resolveEmpires, toSovereignStates, type RawCountry } from "./loadCountries";
+import { EMPIRES, getSovereignStates, resolveEmpires, toSovereignStates, type RawCountry } from "./loadCountries";
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
 const empires = resolveEmpires(countries);
@@ -41,23 +43,40 @@ describe("resolveEmpires", () => {
   });
 });
 
-describe("getDailySource (Daily Challenge data)", () => {
-  it("is the bundled snapshot's 195 sovereign states, sorted by code, with borders and continents", () => {
-    const source = getDailySource();
-    expect(source).toHaveLength(195);
-    const codes = source.map((c) => c.code);
-    expect(codes).toEqual([...codes].sort());
-    const fromSnapshot = new Map(toSovereignStates(snapshot as RawCountry[]).map((c) => [c.code, c]));
-    for (const c of source) {
-      expect(c.borders).toEqual(fromSnapshot.get(c.code)!.borders);
-      expect(c.region).toBe(fromSnapshot.get(c.code)!.region);
-    }
+describe("getSovereignStates (the app's only country data)", () => {
+  it("is the bundled snapshot's 195 sovereign states, sorted by name", () => {
+    const states = getSovereignStates();
+    expect(states).toHaveLength(195);
+    expect(states).toEqual(toSovereignStates(snapshot as RawCountry[]));
+    expect(states.map((c) => c.name)).toEqual([...states.map((c) => c.name)].sort((a, b) => a.localeCompare(b)));
   });
 
   it("never touches the network", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    getDailySource();
+    getSovereignStates();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+describe("offline-first guard", () => {
+  /** Every non-test source file under src/. */
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return sourceFiles(full);
+      return /\.(ts|tsx)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [full] : [];
+    });
+  }
+
+  it("no app code makes a network request", () => {
+    const files = sourceFiles(path.join(process.cwd(), "src"));
+    expect(files.length).toBeGreaterThan(10);
+    for (const file of files) {
+      const code = readFileSync(file, "utf8");
+      for (const call of ["fetch(", "XMLHttpRequest", "EventSource(", "WebSocket(", "sendBeacon("]) {
+        expect(code.includes(call), `${path.relative(process.cwd(), file)} uses ${call}`).toBe(false);
+      }
+    }
   });
 });
