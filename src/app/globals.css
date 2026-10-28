@@ -68,13 +68,14 @@
   --empire-british: #d3e2ff;
   --empire-british-vivid: #3f6fff;
 
-  /* Pathfinding: amber start, teal route, rose destination */
-  --route-start: #ffb547;
-  --route-start-soft: #ffe7bf;
+  /* Pathfinding: violet start, teal route, gold destination, red for a given-up route.
+     The destination is gold so a given-up route's red can't be mistaken for it. */
+  --route-start: #9b87f5;
+  --route-start-soft: #e9e3ff;
   --route-step: #2fb5a5;
   --route-step-soft: #c9f0ea;
-  --route-end: #e8456b;
-  --route-end-soft: #ffd4dd;
+  --route-end: #f2b31b;
+  --route-end-soft: #fff0c4;
   --route-missed: #e0483e; /* a given-up route: the shortest route's countries not reached */
 
   /* Map */
@@ -1461,6 +1462,167 @@ html[data-skip-splash] .splash {
   color: var(--tone-error);
 }
 
+/* --- Party Mode (pass-and-play) --- */
+.daily-badge.party-badge {
+  background: var(--route-start-soft);
+  color: var(--ink);
+}
+
+.handoff-card__eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.solution-hidden {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+/* Next Player and the leaderboard, in a well pressed into the result card. */
+.party-zone {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-pillow);
+  background: var(--clay-surface);
+  box-shadow:
+    inset 4px 5px 10px rgb(var(--shadow-rgb) / 0.16),
+    inset -4px -5px 10px rgb(255 255 255 / 0.85);
+}
+
+.party-zone__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.party-zone__note {
+  flex: 1 1 16rem;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+.party-board {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.party-board__title {
+  margin: 0;
+  font-size: var(--step-1);
+  font-weight: 650;
+}
+
+/* One row per player, full width (not the wrapping chip row other lists use). */
+.raw-list.party-board__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.handoff-card .party-board {
+  margin-top: var(--space-4);
+}
+
+/* Rank, name, and the time over the moves at the right: fits a phone without squeezing names. */
+.party-row {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 var(--space-3);
+  padding: var(--space-2) var(--space-5) var(--space-2) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The player who just finished: tinted, and popped in on a spring. */
+.party-row[data-current] {
+  background: var(--route-start-soft);
+  animation: clay-pop-in var(--spring-bouncy-duration) var(--spring-bouncy) both;
+}
+
+.party-row[data-gave-up] {
+  color: var(--ink-soft);
+}
+
+.party-row__rank {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--clay-surface);
+  box-shadow:
+    inset 2px 2px 4px rgb(255 255 255 / 0.9),
+    inset -2px -3px 5px rgb(var(--shadow-rgb) / 0.2);
+  font-weight: 700;
+}
+
+/* First place wears the destination's gold. */
+.party-row:first-child:not([data-gave-up]) .party-row__rank {
+  background: var(--route-end);
+  color: var(--ink);
+}
+
+.party-row__name {
+  display: grid;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.party-row__player {
+  white-space: nowrap;
+}
+
+.party-row__you {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.party-row__rank,
+.party-row__name {
+  grid-row: 1 / span 2;
+}
+
+.party-row__time {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.party-row__moves {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+/* --- Save Score --- */
+.save-score__status {
+  margin: 0;
+  color: var(--tone-ok);
+  font-size: var(--step--1);
+}
+
+.save-score__status:empty {
+  display: none;
+}
+
 /* --- After a route: Generate New Route, next to Share via QR --- */
 .route-next {
   display: grid;
@@ -2545,7 +2707,8 @@ html[data-challenge="pending"] .setup-only {
   .hint,
   .map-named--popping,
   .map-marker--named,
-  .map-marker--missed {
+  .map-marker--missed,
+  .party-row[data-current] {
     animation: clay-fade-in 120ms ease-out both;
   }
 

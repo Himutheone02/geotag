@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearRounds,
   getSetting,
+  listPartyResults,
   listRounds,
   resetDbConnection,
+  savePartyResult,
   saveRound,
   setSetting,
   summarize,
@@ -92,5 +94,65 @@ describe("summarize", () => {
     expect(continent.secondsPerCountry).toBeCloseTo((60 / 14 + 120 / 54) / 2, 5);
     expect(s.byMode.find((m) => m.mode === "pathfinding")).toMatchObject({ avgWinMs: 40_000, movesOverPar: 1 });
     expect(s.byMode.find((m) => m.mode === "world")).toMatchObject({ played: 0, avgWinMs: null });
+  });
+});
+
+describe("party results (pass-and-play)", () => {
+  const result = (party: string, player: number, timeMs: number) => ({
+    party,
+    route: "FRA-CHN",
+    player,
+    won: true,
+    timeMs,
+    moves: 5,
+    finishedAt: player,
+  });
+
+  it("saves each player's result and lists one party's, in player order", async () => {
+    expect(await savePartyResult(result("a", 2, 50_000))).toBe(true);
+    await savePartyResult(result("a", 1, 70_000));
+    await savePartyResult(result("b", 1, 10_000)); // another party
+    const party = await listPartyResults("a");
+    expect(party!.map((r) => [r.player, r.timeMs])).toEqual([
+      [1, 70_000],
+      [2, 50_000],
+    ]);
+    expect(await listRounds()).toEqual([]); // never mixed into the profile
+  });
+
+  it("upgrading a version-1 profile keeps its rounds and settings", async () => {
+    // Build the original (version 1) database, as earlier builds of the game did.
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open("country-recall", 1);
+      open.onupgradeneeded = () => {
+        const db = open.result;
+        db.createObjectStore("rounds", { keyPath: "id", autoIncrement: true }).createIndex("finishedAt", "finishedAt");
+        db.createObjectStore("settings");
+      };
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction(["rounds", "settings"], "readwrite");
+        tx.objectStore("rounds").add(round({ label: "kept" }));
+        tx.objectStore("settings").put(false, "suggestions");
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+      open.onerror = () => reject(open.error);
+    });
+    expect((await listRounds())!.map((r) => r.label)).toEqual(["kept"]);
+    expect(await getSetting("suggestions", true)).toBe(false);
+    expect(await savePartyResult(result("p", 1, 1_000))).toBe(true);
+    expect(await listPartyResults("p")).toHaveLength(1);
+  });
+
+  it("reports failure quietly without IndexedDB", async () => {
+    // @ts-expect-error simulate storage being unavailable
+    delete globalThis.indexedDB;
+    resetDbConnection();
+    expect(await savePartyResult(result("x", 1, 1))).toBe(false);
+    expect(await listPartyResults("x")).toBeNull();
   });
 });

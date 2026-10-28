@@ -52,10 +52,31 @@ export type RoundRecord = {
   answers?: AnswerRecord[];
 };
 
+/**
+ * One player's go at a pass-and-play route (Party Mode). Kept apart from the profile's
+ * rounds: several people play on one device, so their times aren't the owner's stats.
+ */
+export type PartyResult = {
+  id?: number;
+  /** The party session: every player on the same route, one after another. */
+  party: string;
+  /** The route, "FRA-CHN". */
+  route: string;
+  /** 1 for whoever played first, then 2, 3... */
+  player: number;
+  /** Reached the destination (false: gave up). */
+  won: boolean;
+  timeMs: number;
+  moves: number;
+  finishedAt: number;
+};
+
 const DB_NAME = "country-recall";
-const DB_VERSION = 1;
+/** 2: adds the party store. Upgrading keeps the rounds and settings stores as they are. */
+const DB_VERSION = 2;
 const ROUNDS = "rounds";
 const SETTINGS = "settings";
+const PARTY = "party";
 
 let connection: Promise<IDBDatabase> | null = null;
 
@@ -69,8 +90,19 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(ROUNDS, { keyPath: "id", autoIncrement: true }).createIndex("finishedAt", "finishedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS);
+      if (!db.objectStoreNames.contains(PARTY)) {
+        db.createObjectStore(PARTY, { keyPath: "id", autoIncrement: true }).createIndex("party", "party");
+      }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      // A newer version opened in another tab: step aside so its upgrade isn't blocked.
+      db.onversionchange = () => {
+        db.close();
+        connection = null;
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
     request.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another tab"));
   }).catch((error) => {
@@ -107,6 +139,26 @@ export async function listRounds(limit = Infinity): Promise<RoundRecord[] | null
   try {
     const all = await run(ROUNDS, "readonly", (s) => s.getAll() as IDBRequest<RoundRecord[]>);
     return all.sort((a, b) => b.finishedAt - a.finishedAt).slice(0, limit);
+  } catch {
+    return null;
+  }
+}
+
+/** Saves one player's result in a pass-and-play party. Resolves to false if it couldn't be stored. */
+export async function savePartyResult(result: Omit<PartyResult, "id">): Promise<boolean> {
+  try {
+    await run(PARTY, "readwrite", (s) => s.add(result));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every saved result of one party, in the order they were saved. Null if storage is unavailable. */
+export async function listPartyResults(party: string): Promise<PartyResult[] | null> {
+  try {
+    const all = await run(PARTY, "readonly", (s) => s.index("party").getAll(party) as IDBRequest<PartyResult[]>);
+    return all.sort((a, b) => a.player - b.player);
   } catch {
     return null;
   }

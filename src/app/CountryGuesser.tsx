@@ -13,7 +13,9 @@ import ClayCard from "@/components/ui/ClayCard";
 import ClayInput, { type ClayInputOption } from "@/components/ui/ClayInput";
 import type { EmpireKey, EmpireRound } from "@/data/loadCountries";
 import SplashScreen, { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
-import { getSetting, initDb, saveRound, setSetting, type RoundRecord } from "@/utils/db";
+import { getSetting, initDb, listPartyResults, savePartyResult, saveRound, setSetting, type PartyResult, type RoundRecord } from "@/utils/db";
+import PartyBoard from "@/components/game/PartyBoard";
+import { downloadBlob, renderScoreCard, scoreCardFileName } from "@/utils/scoreCard";
 import { dailyChallenge, dateKey } from "@/utils/dailySeed";
 import {
   answerForInput,
@@ -324,6 +326,28 @@ export const TYPO_ACCEPT_DELAY_MS = 700;
 /* ------------------------------------------------------------------ */
 
 type Feedback = { tone: "ok" | "warn" | "error" | "hint"; text: string } | null;
+
+/**
+ * Pass-and-play (Party Mode): players take turns on one route, one device. Player 1's
+ * round is the one that was just played; each later player gets a hand-over screen, and
+ * the clock starts at 00:00 when they tap Start.
+ */
+type Party = {
+  id: string;
+  /** The route, "FRA-CHN". */
+  route: string;
+  /** Whose turn it is (or was, on the result screen). */
+  player: number;
+  /** The session round being played as this player's turn; null while handing over. */
+  round: number | null;
+  /** Showing the hand-over screen. */
+  handoff: boolean;
+};
+
+const newPartyId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 type Props = {
   /** The 195 sovereign states, from the bundled countries.json (the app's only country data). */
   countries: Country[];
@@ -382,6 +406,14 @@ export default function CountryGuesser({
   const [presses, setPresses] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  const handoffHeadingRef = useRef<HTMLHeadingElement>(null);
+  // Party Mode: the session, and its results (saved in IndexedDB, mirrored here).
+  const [party, setParty] = useState<Party | null>(null);
+  const [partyResults, setPartyResults] = useState<PartyResult[]>([]);
+  // During a party the shortest route stays hidden, unless revealed for this round.
+  const [revealedRound, setRevealedRound] = useState<number | null>(null);
+  // Save Score: idle, drawing the card, or how the last attempt went.
+  const [scoreCard, setScoreCard] = useState<{ round: number; state: "saving" | "saved" | "failed" } | null>(null);
 
   const rounds = useMemo(() => {
     const all = new Map<RoundKey, Round>();
@@ -622,6 +654,51 @@ export default function CountryGuesser({
     else start(challenge.continent, "countries", dailyDate);
   }
 
+  /* ---------------- Party Mode (pass-and-play) ---------------- */
+
+  /** Shows a result on the leaderboard at once, saves it, then shows what IndexedDB holds. */
+  function recordPartyResult(result: PartyResult) {
+    setPartyResults((prev) => [...prev.filter((r) => r.player !== result.player), result]);
+    void savePartyResult(result)
+      .then(() => listPartyResults(result.party))
+      .then((saved) => {
+        // Keep the in-memory board if storage is unavailable or lost a write.
+        if (saved && saved.some((r) => r.player === result.player)) setPartyResults(saved);
+      });
+  }
+
+  /** "Next Player": the same route for the next person, after a hand-over screen. */
+  function nextPlayer() {
+    if (!session.route || session.elapsedMs === null) return;
+    let current = party;
+    if (!current) {
+      // The round just played becomes player 1's turn (it's already in the profile, as usual).
+      current = { id: newPartyId(), route: routeParam(session.route), player: 1, round: session.round, handoff: false };
+      recordPartyResult({
+        party: current.id,
+        route: current.route,
+        player: 1,
+        won: session.status === "won",
+        timeMs: session.elapsedMs,
+        moves: session.moves,
+        finishedAt: Date.now(),
+      });
+    }
+    setParty({ ...current, player: current.player + 1, round: null, handoff: true });
+  }
+
+  /** The next player taps Start: the same route, a fresh clock from 00:00. */
+  function startPartyTurn() {
+    if (!party || !session.route) return;
+    startRoute(session.route, null, false);
+    setParty({ ...party, handoff: false, round: session.round + 1 });
+  }
+
+  function endParty() {
+    setParty(null);
+    setPartyResults([]);
+  }
+
   function accept(
     country: Country,
     typed: string,
@@ -758,6 +835,20 @@ export default function CountryGuesser({
     inputRef.current?.focus();
   }
 
+  // Leaving the route (a new route, another round, the menu) ends the party.
+  useEffect(() => {
+    if (!party || party.handoff) return;
+    if (status === "setup" || party.round !== session.round) {
+      setParty(null);
+      setPartyResults([]);
+    }
+  }, [party, status, session.round]);
+
+  // The hand-over screen: focus its heading, for keyboard and screen-reader users.
+  useEffect(() => {
+    if (party?.handoff) handoffHeadingRef.current?.focus();
+  }, [party?.handoff, party?.player]);
+
   // Keyboard and screen-reader users land on the result when the round ends.
   useEffect(() => {
     if (isOver) resultHeadingRef.current?.focus();
@@ -804,6 +895,20 @@ export default function CountryGuesser({
     const { elapsedMs } = session;
     if (!isOver || elapsedMs === null || savedRound.current === session.round) return;
     savedRound.current = session.round;
+    // A party turn (player 2 onwards): to the party's leaderboard, never the profile.
+    if (party && !party.handoff && party.round === session.round && session.route) {
+      const result: PartyResult = {
+        party: party.id,
+        route: party.route,
+        player: party.player,
+        won: session.status === "won",
+        timeMs: elapsedMs,
+        moves: session.moves,
+        finishedAt: Date.now(),
+      };
+      recordPartyResult(result);
+      return;
+    }
     const common = {
       result: session.status === "won" ? "won" : "forfeited",
       timeMs: elapsedMs,
@@ -843,7 +948,7 @@ export default function CountryGuesser({
       };
     }
     if (record) void saveRound(record);
-  }, [isOver, session, countryIndex, rounds, shareText]);
+  }, [isOver, session, countryIndex, rounds, shareText, party]);
 
   const total = session.targetCodes.length;
   const missed = status === "forfeited" ? missing : [];
@@ -863,11 +968,16 @@ export default function CountryGuesser({
   // Pathfinding map: framed around one shortest route; start and end always shown.
   const routeFrame = useMemo(() => (route ? { around: route.shortest } : null), [route]);
   const won = status === "won";
+  // In a party the shortest route stays hidden (the next player would see it), unless revealed.
+  const hideSolution = party !== null && revealedRound !== session.round;
+  const handingOver = party?.handoff === true;
   // Given up: the countries of one shortest route the player never stepped into, shown in red.
   const routeMissed = useMemo(
     () =>
-      route && status === "forfeited" ? new Set(route.shortest.slice(1, -1).filter((code) => !namedSet.has(code))) : null,
-    [route, status, namedSet],
+      route && status === "forfeited" && !hideSolution
+        ? new Set(route.shortest.slice(1, -1).filter((code) => !namedSet.has(code)))
+        : null,
+    [route, status, namedSet, hideSolution],
   );
   const routeEndpoints = useMemo(
     () =>
@@ -1016,6 +1126,34 @@ export default function CountryGuesser({
   );
   const shortestBetween = route ? route.shortest.slice(1, -1).map(nameOf) : [];
 
+  /** "Save Score": the won route as a keepsake PNG card, downloaded. */
+  async function saveScore() {
+    const svg = mapStageRef.current?.querySelector<SVGSVGElement>("svg.world-map");
+    if (!route || !svg || session.elapsedMs === null) return;
+    const round = session.round;
+    setScoreCard({ round, state: "saving" });
+    const title = `${nameOf(route.start)} to ${nameOf(route.end)}`;
+    const date = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const details = [party ? `Player ${party.player}` : null, movesWord(session.moves), `shortest ${route.par}`, date]
+      .filter(Boolean)
+      .join(" · ");
+    try {
+      const blob = await renderScoreCard({
+        map: svg,
+        logo: document.querySelector<HTMLImageElement>("img.brand-logo"),
+        title,
+        time: finalTime,
+        details,
+      });
+      if (!blob) throw new Error("This browser can't draw the card");
+      downloadBlob(blob, scoreCardFileName(title));
+      setScoreCard({ round, state: "saved" });
+    } catch {
+      setScoreCard({ round, state: "failed" });
+    }
+  }
+  const scoreCardState = scoreCard?.round === session.round ? scoreCard.state : null;
+
   // The transparent logo, straight on the page background: no tile, no badge, no text.
   // Its height is set in CSS (.brand-logo); its alt text names the heading it sits in.
   const logo = <img className="brand-logo" src={LOGO_SRC} alt={BRAND_NAME} />;
@@ -1065,10 +1203,11 @@ export default function CountryGuesser({
             <h1 className="game-title">
               {isRoute && route ? `${nameOf(route.start)} to ${nameOf(route.end)}` : roundTitle}
               {session.daily && <span className="daily-badge">Daily</span>}
+              {party && <span className="daily-badge party-badge">Player {party.player}</span>}
             </h1>
           </div>
         )}
-        {status !== "setup" && (
+        {status !== "setup" && !handingOver && (
           <div className="stats">
             {isRoute ? (
               <p className="counter">
@@ -1318,9 +1457,30 @@ export default function CountryGuesser({
         />
       )}
 
-      {isOver && isRoute && route && (
+      {handingOver && party && route && (
+        <ClayCard as="section" aria-labelledby="handoff-heading" data-theme="Pathfinding" className="handoff-card">
+          <p className="handoff-card__eyebrow">Pass and play</p>
+          <h2 id="handoff-heading" ref={handoffHeadingRef} tabIndex={-1} className="card-title result-title">
+            Player {party.player}, you&apos;re up
+          </h2>
+          <p className="card-lead">
+            Same route: {nameOf(route.start)} to {nameOf(route.end)}. Hand over the device; the clock starts at 00:00
+            when you tap Start.
+          </p>
+          {partyResults.length > 0 && <PartyBoard results={partyResults} current={null} />}
+          <div className="result-actions">
+            <ClayButton onClick={startPartyTurn}>Start</ClayButton>
+            <ClayButton variant="soft" onClick={endParty}>
+              End party
+            </ClayButton>
+          </div>
+        </ClayCard>
+      )}
+
+      {isOver && isRoute && route && !handingOver && (
         <ClayCard as="section" aria-labelledby="result-heading" data-theme="Pathfinding">
           <h2 id="result-heading" ref={resultHeadingRef} tabIndex={-1} className="card-title result-title">
+            {party && `Player ${party.player}: `}
             {won ? `You reached ${nameOf(route.end)}` : "Route abandoned"}
           </h2>
           <p className="card-lead">
@@ -1328,16 +1488,27 @@ export default function CountryGuesser({
               ? `${nameOf(route.start)} to ${nameOf(route.end)} in ${movesWord(session.moves)}, ${finalTime}. The shortest route has ${route.par} countries in between.`
               : `You forfeited at ${finalTime} after ${movesWord(session.moves)}.`}
           </p>
-          <p className="card-lead">One shortest route:</p>
-          <ol className="raw-list route-list" aria-label="One shortest route">
-            {shortestBetween.map((name) => (
-              <li key={name} className="chip chip--missed">
-                <span className="chip-name">{name}</span>
-              </li>
-            ))}
-          </ol>
+          {hideSolution ? (
+            <div className="solution-hidden">
+              <p className="card-lead">The shortest route stays hidden while the party is on, so the next player can&apos;t see it.</p>
+              <ClayButton variant="soft" size="sm" onClick={() => setRevealedRound(session.round)}>
+                Show the shortest route
+              </ClayButton>
+            </div>
+          ) : (
+            <>
+              <p className="card-lead">One shortest route:</p>
+              <ol className="raw-list route-list" aria-label="One shortest route">
+                {shortestBetween.map((name) => (
+                  <li key={name} className="chip chip--missed">
+                    <span className="chip-name">{name}</span>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
           {shareText && <ShareResult text={shareText} />}
-          {/* Straight on to another route, no menu; or share this one. */}
+          {/* Straight on to another route, no menu; or share this one, or keep it. */}
           <div className="route-next">
             <div className="route-next__buttons">
               <ClayButton className="route-next__new" onClick={() => startRoute()}>
@@ -1348,8 +1519,39 @@ export default function CountryGuesser({
                   Share via QR
                 </ClayButton>
               )}
+              {won && (
+                <ClayButton
+                  variant="soft"
+                  className="save-score"
+                  onClick={() => void saveScore()}
+                  disabled={scoreCardState === "saving" || session.elapsedMs === null}
+                >
+                  {scoreCardState === "saving" ? "Saving…" : "Save Score"}
+                </ClayButton>
+              )}
             </div>
             {challengeLink && <p className="qr-share__note">Another phone scans the QR code to play this exact route.</p>}
+            <p className="save-score__status" role="status">
+              {scoreCardState === "saved"
+                ? "Score card saved as a PNG."
+                : scoreCardState === "failed"
+                  ? "Couldn't make the score card in this browser."
+                  : ""}
+            </p>
+          </div>
+          {/* Party Mode: the same route for the next person. */}
+          <div className="party-zone">
+            {party && partyResults.length > 0 && <PartyBoard results={partyResults} current={party.player} />}
+            <div className="party-zone__row">
+              <ClayButton variant="soft" onClick={nextPlayer} disabled={session.elapsedMs === null}>
+                Next Player
+              </ClayButton>
+              <p className="party-zone__note">
+                {party
+                  ? `Player ${party.player + 1} plays this same route, from 00:00.`
+                  : "Pass and play: the next person plays this same route, from 00:00. Times are ranked here."}
+              </p>
+            </div>
           </div>
           {qrOpen && (
             <Suspense fallback={null}>
@@ -1402,7 +1604,7 @@ export default function CountryGuesser({
         </ClayCard>
       )}
 
-      {status !== "setup" && isRoute && route && routeFrame && (
+      {status !== "setup" && isRoute && route && routeFrame && !handingOver && (
         <ClayCard as="section" aria-label="Map" className="map-card">
           <div className="map-stage" ref={mapStageRef}>
             <Suspense fallback={<div className="map-placeholder" />}>
@@ -1466,7 +1668,7 @@ export default function CountryGuesser({
         </ClayCard>
       )}
 
-      {status !== "setup" && isRoute && route && (
+      {status !== "setup" && isRoute && route && !handingOver && (
         <ClayCard as="section" aria-labelledby="route-heading" data-theme="Pathfinding">
           <h2 id="route-heading" className="card-title">
             Your route

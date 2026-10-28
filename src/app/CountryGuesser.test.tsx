@@ -1125,6 +1125,128 @@ describe("boot-up splash and logo", () => {
   });
 });
 
+describe("Party Mode (pass-and-play)", () => {
+  const graph = buildBorderGraph(countries);
+  const puzzle = pickRoute(graph, { random: () => 0 })!;
+  const name = (code: string) => byCode.get(code)!.name;
+  const title = `${name(puzzle.start)} to ${name(puzzle.end)}`;
+  const heading = () => $("#result-heading, #handoff-heading")!.textContent;
+  const board = () =>
+    [...container.querySelectorAll(".party-row")].map((row) => [...row.children].map((c) => c.textContent).join(" | "));
+  /** Walks the shortest route after `seconds` on the clock. */
+  function finish(seconds: number) {
+    wait(seconds * 1000);
+    for (const code of puzzle.shortest.slice(1, -1)) {
+      typeKeys(name(code));
+      if ($<HTMLInputElement>("input")?.value) pressEnter();
+    }
+  }
+
+  beforeEach(() => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    clickButton("Pathfinding");
+    clickButton("Start");
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Next Player keeps the route and hands over; the clock starts at 00:00 only on Start", () => {
+    finish(30);
+    clickButton("Next Player");
+    expect(heading()).toBe("Player 2, you're up");
+    expect(document.activeElement).toBe($("#handoff-heading"));
+    // Nothing of player 1's round is left to see: no map, no route, no clock.
+    expect($(".map-card")).toBeNull();
+    expect($("[role=timer]")).toBeNull();
+    expect($("#result-heading")).toBeNull();
+    wait(20_000); // passing the phone takes as long as it takes
+    clickButton("Start");
+    expect($("h1")!.textContent).toBe(`${title}Player 2`);
+    expect(timer()).toBe("00:00");
+    expect($(".counter-value")!.textContent).toBe("0");
+    expect($(".route-prompt")!.textContent).toBe(`You're in ${name(puzzle.start)}. Name a country that borders it.`);
+  });
+
+  it("ranks each player's time on the result screen", () => {
+    finish(30);
+    clickButton("Next Player");
+    expect(board()).toEqual([`1 | Player 1 | 00:30 | ${puzzle.par} moves`]); // on the hand-over screen too
+    clickButton("Start");
+    finish(12);
+    expect(heading()).toBe(`Player 2: You reached ${name(puzzle.end)}`);
+    expect(board()).toEqual([
+      `1 | Player 2just played | 00:12 | ${puzzle.par} moves`,
+      `2 | Player 1 | 00:30 | ${puzzle.par} moves`,
+    ]);
+    clickButton("Next Player");
+    clickButton("Start");
+    wait(3_000);
+    clickButton("Give Up");
+    expect(board()[2]).toBe("– | Player 3just played | Gave up | 0 moves");
+  });
+
+  it("keeps the shortest route hidden during the party, until someone asks to see it", () => {
+    finish(5);
+    clickButton("Next Player");
+    clickButton("Start");
+    clickButton("Give Up");
+    expect($('[aria-label="One shortest route"]')).toBeNull();
+    expect(container.querySelector(".map-named--missed, .map-marker--missed, .map-note--missed")).toBeNull();
+    clickButton("Show the shortest route");
+    expect([...container.querySelectorAll('[aria-label="One shortest route"] .chip-name')].map((e) => e.textContent)).toEqual(
+      puzzle.shortest.slice(1, -1).map(name),
+    );
+  });
+
+  it("End party on the hand-over screen goes back to the last result, route shown", () => {
+    finish(5);
+    clickButton("Next Player");
+    clickButton("End party");
+    expect(heading()).toBe(`You reached ${name(puzzle.end)}`);
+    expect($('[aria-label="One shortest route"]')).not.toBeNull();
+    expect($(".party-badge")).toBeNull();
+  });
+
+  it("leaving the route (Generate New Route) ends the party", () => {
+    finish(5);
+    clickButton("Next Player");
+    clickButton("Start");
+    clickButton("Give Up");
+    clickButton("Generate New Route");
+    expect($(".party-badge")).toBeNull();
+    clickButton("Give Up");
+    expect($(".party-board")).toBeNull();
+    expect(heading()).toBe("Route abandoned");
+  });
+});
+
+describe("Save Score", () => {
+  beforeEach(() => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    clickButton("Pathfinding");
+    clickButton("Start");
+  });
+  afterEach(() => vi.restoreAllMocks());
+  const saveButton = () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Save Score");
+
+  it("is offered on a won route, not after giving up", async () => {
+    const puzzle = pickRoute(buildBorderGraph(countries), { random: () => 0 })!;
+    clickButton("Give Up");
+    expect(saveButton()).toBeUndefined();
+    clickButton("Generate New Route");
+    await loadMap();
+    for (const code of puzzle.shortest.slice(1, -1)) {
+      typeKeys(byCode.get(code)!.name);
+      if ($<HTMLInputElement>("input")?.value) pressEnter();
+    }
+    const row = [...container.querySelectorAll(".route-next__buttons button")].map((b) => b.textContent);
+    expect(row).toEqual(["Generate New Route", "Share via QR", "Save Score"]);
+    // happy-dom has no canvas: the button says so instead of failing silently.
+    await act(async () => saveButton()!.click());
+    await act(async () => {});
+    expect($(".save-score__status")!.textContent).toBe("Couldn't make the score card in this browser.");
+  });
+});
+
 describe("haptics", () => {
   let buzz: ReturnType<typeof vi.fn<(pattern: number[]) => boolean>>;
   const toggle = () => $<HTMLButtonElement>(".haptics-toggle");

@@ -27,6 +27,8 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/DailyCard.tsx` | The setup screen's Daily Challenge card: today's puzzle, and once played, the first result with its Share button. |
 | `src/components/game/ShareResult.tsx` | "Share result": copies the share text with `navigator.clipboard.writeText`; if the clipboard is unavailable the text stays visible to copy by hand. |
 | `src/components/game/SplashScreen.tsx` | Boot-up screen: the full logo, the coral PLAY button and a loader. PLAY unlocks once IndexedDB is open and the map data has loaded. |
+| `src/components/game/PartyBoard.tsx` | Party Mode's leaderboard and `rankParty` (finishers by time, then moves; players who gave up last, unranked). |
+| `src/utils/scoreCard.ts` | "Save Score": draws the won route's card on a `<canvas>` (`renderScoreCard`), copies the live map with its computed styles inlined (`mapForExport`), names the file, and downloads the PNG. |
 | `src/components/game/QrShareModal.tsx` | "Share via QR": a native modal `<dialog>` with the route's challenge link as a QR code (`qrcode.react`'s `QRCodeSVG`), pressed into a clay well. Loaded on demand. |
 | `src/components/game/ProfilePanel.tsx` | The Profile & Stats tab: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
@@ -34,7 +36,7 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/utils/haptics.ts` | `vibrate()` (30 ms, feature-checked, never throws), `canVibrate()` and `hapticsUseful()` (the API exists and the pointer is coarse). |
 | `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD) and `dailyChallenge` (seeded route or continent). |
 | `src/utils/share.ts` | Spoiler-free share text: `routeGrid`, `paceGrid`, `buildShareText`. |
-| `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, stores `rounds` and `settings`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, and the pure `summarize`. Every call fails soft when storage is unavailable. |
+| `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, version 2, stores `rounds`, `settings` and `party`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, `savePartyResult`/`listPartyResults`, and the pure `summarize`. Upgrading from version 1 keeps existing rounds and settings. Every call fails soft when storage is unavailable. |
 | `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and step rules (`applyStep`, `reachesEnd`). |
 | `src/data/countries.json` | Country data: the app's only source, bundled at build time (the REST Countries fields the app uses). Nothing is fetched at runtime. |
 | `src/data/world-map.json` | Map data: Natural Earth 1:50m outlines keyed by cca3, simplified to 15% of points (163 KB, 52 KB gzipped), plus a marker point per sovereign state. Built by `scripts/build-map.mjs`. |
@@ -63,7 +65,23 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 5. **Give Up:** a small, recessed button under the map while the route is on (routes have no Forfeit button: this replaces it). It stops the timer at once, ends the route, and shows in red (`--route-missed`) the countries of one shortest route you never stepped into, with a key under the map; the result card lists the whole route by name.
 6. **Generate New Route:** on the result card, next to Share via QR (stacked on narrow phones). It draws a new random route and starts it immediately, without going back to the menu.
 
-On the map the start (amber) and destination (rose, pulsing until reached) are labeled and always highlighted, and each step fills in teal. The map is framed around one shortest route.
+On the map the start (violet) and destination (gold, pulsing until reached) are labeled and always highlighted, and each step fills in teal; a given-up route's missing countries are red. The map is framed around one shortest route.
+
+### Party Mode (pass and play)
+
+Several people play the same route on one device, one after another.
+
+1. On a route's result screen, **Next Player** starts a party. The round just played becomes Player 1's.
+2. A hand-over screen ("Player 2, you're up") replaces the result, map and clock, so the next player sees nothing of the last one's route. The clock starts at 00:00 only when they tap **Start**, so passing the device doesn't cost them time. **End party** goes back to the last result.
+3. Each player's time and moves are saved in IndexedDB (`party` store, one id per party) and shown as a leaderboard on every result screen: finishers by time (then moves), players who gave up after them, unranked. The player who just finished is highlighted.
+4. While the party is on, the result screen hides the shortest route (list and red map), with **Show the shortest route** for afterwards.
+5. Only Player 1's round goes into the profile's history and stats; other players' rounds don't. Leaving the route (Generate New Route, Choose another round, a challenge link, reloading the page) ends the party; its results stay stored but aren't shown again.
+
+Player 1's own result screen shows the shortest route before anyone presses Next Player, so the next player should look away (or Player 1 can tap Next Player straight away).
+
+### Save Score
+
+On a won route, **Save Score** downloads a PNG keepsake (1080x1350): the final route map as the photo of an off-white instant-photo/trading card with a soft drop shadow on the peach-lavender backdrop, the route, the time in large type, moves, the shortest route's length and the date (and "Player N" in a party), and the geotag logo at the foot. It's drawn with the Canvas API only: the live map's `<svg>` is copied with each element's computed styles written in (an SVG drawn as an image can't see the page's CSS), drawn as an image, and the place names are set on the canvas in Fredoka. No network, no libraries. Browsers that can't draw on a canvas get a message instead.
 
 ### The border graph
 

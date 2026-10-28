@@ -8,7 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import { getSetting, listRounds, resetDbConnection, saveRound, type RoundRecord } from "@/utils/db";
+import { getSetting, listPartyResults, listRounds, resetDbConnection, saveRound, type RoundRecord } from "@/utils/db";
 import CountryGuesser from "./CountryGuesser";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -342,5 +342,38 @@ describe("vibration setting", () => {
     unmount();
     mount();
     await eventually(() => expect(toggle().getAttribute("aria-pressed")).toBe("false"));
+  });
+});
+
+describe("Party Mode storage", () => {
+  it("saves every player's time in IndexedDB, and only player 1's round in the profile", async () => {
+    clickButton("Pathfinding");
+    clickButton("Start");
+    clickButton("Give Up");
+    await eventually(async () => expect(await listRounds()).toHaveLength(1)); // player 1: an ordinary round
+    clickButton("Next Player");
+    clickButton("Start");
+    clickButton("Give Up");
+    clickButton("Next Player");
+    clickButton("Start");
+    clickButton("Give Up");
+    await eventually(() => expect($$(".party-row")).toHaveLength(3));
+    const rounds = await listRounds();
+    expect(rounds).toHaveLength(1); // players 2 and 3 aren't the profile owner
+    const routeKey = rounds![0].roundKey;
+    // The leaderboard shows what IndexedDB holds for this party.
+    const all = await new Promise<{ party: string; route: string; player: number }[]>((resolve) => {
+      const open = indexedDB.open("country-recall");
+      open.onsuccess = () => {
+        const req = open.result.transaction("party").objectStore("party").getAll();
+        req.onsuccess = () => {
+          open.result.close();
+          resolve(req.result);
+        };
+      };
+    });
+    expect(all.map((r) => r.player)).toEqual([1, 2, 3]);
+    expect(new Set(all.map((r) => r.route))).toEqual(new Set([routeKey]));
+    expect(await listPartyResults(all[0].party)).toHaveLength(3);
   });
 });
