@@ -55,6 +55,8 @@ export const LOGO_SRC = "/logo.png";
 // The QR modal (and the QR library inside it) loads only after a route ends.
 const loadQrShareModal = () => import("@/components/game/QrShareModal");
 const QrShareModal = lazy(loadQrShareModal);
+/** The QR chunk is fetched this long after the page loads, so it's there offline. */
+const QR_PRELOAD_MS = 2000;
 
 /* ------------------------------------------------------------------ */
 /* Rounds                                                              */
@@ -1100,6 +1102,11 @@ export default function CountryGuesser({
   useEffect(() => {
     if (routeOver) void loadQrShareModal();
   }, [routeOver]);
+  // And once, shortly after the page loads, so the service worker caches it for offline play.
+  useEffect(() => {
+    const timer = setTimeout(() => void loadQrShareModal(), QR_PRELOAD_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const movesWord = (n: number) => (n === 1 ? "1 move" : `${n} moves`);
   const roundTitle = current ? (isCapitals ? `${current.title} capitals` : current.title) : null;
   /** The answer shown for a country this round: its name, or its capital. */

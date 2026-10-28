@@ -1,19 +1,27 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { BRAND_NAME } from "@/utils/share";
+import ServiceWorkerRegistration from "./ServiceWorkerRegistration";
 import "./globals.css";
-
-// Inline favicon (a pastel clay dot) so no extra file is needed in /src/app or /public.
-const FAVICON =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><radialGradient id="g" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#e6eeff"/><stop offset="1" stop-color="#a8c5ff"/></radialGradient></defs><circle cx="32" cy="32" r="28" fill="url(#g)"/></svg>',
-  );
 
 export const metadata: Metadata = {
   title: BRAND_NAME,
   applicationName: BRAND_NAME,
   description: "Name every sovereign state. Typos forgiven, guesses not.",
-  icons: { icon: FAVICON },
+  // <link rel="manifest" href="/manifest.json">: installable as a standalone app (public/manifest.json).
+  manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icons/favicon-64.png", sizes: "64x64", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    // iPhone and iPad home screens use this, not the manifest's icons.
+    apple: { url: "/icons/apple-touch-icon.png", sizes: "180x180" },
+  },
+  appleWebApp: { capable: true, title: BRAND_NAME, statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f3efff", // the page's lilac, as in the manifest
 };
 
 /**
@@ -31,7 +39,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: CHALLENGE_PENDING_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <ServiceWorkerRegistration />
+      </body>
     </html>
   );
 }

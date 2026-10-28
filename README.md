@@ -15,6 +15,10 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | File | Role |
 | --- | --- |
 | `src/app/page.tsx` | Server Component: loads the countries and renders the game. |
+| `src/app/layout.tsx` | Root layout: title, `<link rel="manifest">`, icons (incl. the Apple touch icon), theme color, the challenge-link pre-paint script, and the service worker registration. |
+| `src/app/ServiceWorkerRegistration.tsx` | Client component (renders nothing): registers `/sw.js?v=<build id>` after the page loads, in production builds only, then hands the worker the list of files the page has loaded. |
+| `public/sw.js` | The service worker: plain JavaScript, no libraries. See "Install and offline". |
+| `public/manifest.json`, `public/icons/` | Web app manifest (standalone, lilac theme) and square app icons made from the mascot: 192, 512, 512 maskable, 180 for Apple, 64 favicon. |
 | `src/app/CountryGuesser.tsx` | Interactive client component: rounds (continent, empire, world), game session reducer (`sessionReducer`), setup with the mode switch, live typing, results. Must be its own file because `"use client"` applies to a whole file. |
 | `src/app/globals.css` | The whole claymorphic theme: every design token (color, shadows, radii, springs, type, space) in `:root`, plus component and game styles. |
 | `src/components/ui/ClayCard.tsx` | Extruded container (`as` picks the element). |
@@ -170,6 +174,19 @@ A 30 ms buzz (`navigator.vibrate([30])`) on PLAY, on a map tap that shows a coun
 - **Where it works:** Chrome-based browsers on Android. No iPhone or iPad browser has the Vibration API, and desktops have nothing to vibrate. Browsers also ignore it until the person has tapped or typed on the page.
 - **The toggle** (a phone icon at the right of the logo row) is shown only where it can do something: the API exists and the main pointer is a finger (`(pointer: coarse)`). It's on by default; turning it off is saved in IndexedDB (`haptics` setting), and turning it back on gives one buzz.
 
+## Install and offline
+
+geotag is an installable web app (PWA): Chrome checks it as installable with no errors, and after one online visit it opens and plays with no connection, from the browser or the home screen.
+
+- **Manifest** (`public/manifest.json`): standalone display, starts at `/`, lilac theme color (`#f3efff`, the page's own), square PNG icons in `public/icons/`, cut from the mascot artwork on the splash's gradient: 192 and 512 ("any"), a 512 "maskable" one with the mascot inside the safe zone, a 180 Apple touch icon (iPhones and iPads use it, not the manifest's), and a 64 favicon. The wordmark (`/logo.png`, 511x168) and the full logo (`/assets/logo-full.webp`, 719x900) aren't square, so they can't be app icons.
+- **Service worker** (`public/sw.js`), registered after the page loads, production builds only:
+  - **Install:** caches the page (the country data is built into it: there's no separate `countries.json` request), every `/_next/static/` file the page names (scripts and CSS, including chunks only named inside its inline data), the font, the logos and the icons.
+  - **Files loaded on demand:** the map and QR chunks aren't named in the page. The page hands the worker its list of loaded files (twice: when the worker is ready and 5 s later) and loads the QR chunk 2 s after start-up, so both are cached on the first visit.
+  - **Serving:** pages network-first (online players always get the latest build; offline, or after 4 s without an answer, the cached page, for `?route=` links too); `/_next/static/` cache-first (file names change with their content); other files of ours from the cache, refreshed in the background. Other sites, non-GET and React Server Component requests are left alone.
+  - **Updates:** the worker URL carries the build id (`NEXT_PUBLIC_BUILD_ID`, set in `next.config.ts`; pin it with `GEOTAG_BUILD_ID`). A new deploy installs a new worker, which caches the new build and deletes the old cache.
+- **Checked:** `sw.test.ts` runs the worker against a fake Cache Storage and network; in Chromium, after one visit, stopping the server entirely still lets the game load, draw the map, play a route, open the QR code, and open a `?route=` link.
+- **Limits:** the first visit must be online. Service workers need HTTPS (or localhost). On iPhone and iPad, the home-screen app keeps its own storage, apart from Safari's, so a profile built up in Safari doesn't carry over to the installed app.
+
 ## Boot-up splash and logo
 
 **Brand files** live in `/public` and ship with the code. Neither is checked for: both are always used.
@@ -315,7 +332,7 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 - Taiwan and Kosovo are excluded by the UN-based definition. Add their codes to `UN_OBSERVER_STATES` in `loadCountries.ts` to include them.
 - The dataset marks Vatican City `unMember: true` (it is a UN observer). The 195 count is still correct because Vatican City is included either way. Don't rely on `unMember` alone elsewhere.
 - The bundled `countries.json` was generated from the mledoze/countries dataset, which uses the same field structure REST Countries serves. `npm run snapshot` replaces it with a fresh pull from REST Countries; that's a maintenance step run on your machine, never by the app.
-- **No network at runtime:** the page is fully static (built once, no revalidation), and no app code calls `fetch` or any other network API. A test (`loadCountries.test.ts`, "offline-first guard") fails if one is added. The page itself still has to be loaded once from the server: there's no service worker, so it doesn't open offline.
+- **No network at runtime:** the page is fully static (built once, no revalidation), and no app code calls `fetch` or any other network API. A test (`loadCountries.test.ts`, "offline-first guard") fails if one is added. The only `fetch` calls are the service worker's, which only ever fetch the game's own files to cache them. After one online visit the game opens with no connection (see "Install and offline").
 
 ## Empire data to review
 
