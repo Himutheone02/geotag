@@ -1,7 +1,18 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import DailyCard, { longDate } from "@/components/game/DailyCard";
 import HintPanel, { letterCount, letterPattern, MAX_HINTS, pickHintTarget, type Hint } from "@/components/game/HintPanel";
 import MapTooltip from "@/components/game/MapTooltip";
@@ -77,6 +88,12 @@ export type Continent = (typeof CONTINENTS)[number];
 export type GameMode = "continent" | "historical" | "world" | "pathfinding";
 /** One playable round: a continent, an empire, or the whole world. Also keys the map framing. */
 export type RoundKey = Continent | EmpireKey | "World";
+/**
+ * Every round Daily Guessing deals from: the continents, the empires and the World. Fixed
+ * here rather than read from the data, so the daily can't shift if an empire fails to load;
+ * changing it reshuffles every future Daily Guessing.
+ */
+export const GUESSING_POOL: readonly RoundKey[] = [...CONTINENTS, "Roman", "Mughal", "Ottoman", "Soviet", "British", "World"];
 
 type Round = {
   mode: GameMode;
@@ -95,6 +112,31 @@ type Round = {
   /** Why a recognized country doesn't count, or null if every country counts. */
   outOfScope: ((countryName: string) => string) | null;
 };
+
+/** Daily Guessing's card: "Name all 54 countries in Africa." */
+function dailyGuessingLead(round: Round): ReactNode {
+  const n = round.targetCodes.length;
+  if (round.mode === "historical") {
+    return (
+      <>
+        Name all {n} modern countries on the <strong>{round.title}</strong> list.
+      </>
+    );
+  }
+  if (round.mode === "world") {
+    return (
+      <>
+        Name all {n} countries in the <strong>World</strong>.
+      </>
+    );
+  }
+  return (
+    <>
+      Name all {n} countries in {round.key === "Americas" ? "the " : ""}
+      <strong>{round.title}</strong>.
+    </>
+  );
+}
 
 /** Tabs on the setup screen, one per game mode. (Profile & Stats is in the header.) */
 type SetupTab = GameMode;
@@ -551,9 +593,10 @@ export default function CountryGuesser({
 
   // Today's two dailies, each from its own seed.
   const dailies = useMemo(
-    () => (today ? { guessing: dailyGuessing(today, CONTINENTS), pathfinding: dailyPathfinding(today, graph) } : null),
+    () => (today ? { guessing: dailyGuessing(today, GUESSING_POOL), pathfinding: dailyPathfinding(today, graph) } : null),
     [today, graph],
   );
+  const dailyRound = dailies ? (rounds.get(dailies.guessing.round) ?? null) : null;
 
   // Both dailies unlock at local midnight: roll the setup screen over to the new date then,
   // even if the page has been open all along. Timers stall while a device sleeps or a tab
@@ -714,7 +757,7 @@ export default function CountryGuesser({
       const challenge = dailyPathfinding(date, graph);
       if (challenge) startRoute(challenge.puzzle, dailyDate);
     } else {
-      start(dailyGuessing(date, CONTINENTS).continent, "countries", dailyDate);
+      start(dailyGuessing(date, GUESSING_POOL).round, "countries", dailyDate);
     }
   }
 
@@ -1427,12 +1470,25 @@ export default function CountryGuesser({
             </h2>
             <p className="dailies__note">The same two puzzles for everyone today. New ones unlock at midnight, your time.</p>
           </div>
-          <DailyCard key={`guessing:${today}`} challenge={dailies.guessing} nameOf={nameOf} onPlay={(replay) => startDaily("guessing", replay)} />
+          {dailyRound && (
+            <DailyCard
+              key={`guessing:${today}`}
+              challenge={dailies.guessing}
+              lead={dailyGuessingLead(dailyRound)}
+              onPlay={(replay) => startDaily("guessing", replay)}
+            />
+          )}
           {dailies.pathfinding && (
             <DailyCard
               key={`pathfinding:${today}`}
               challenge={dailies.pathfinding}
-              nameOf={nameOf}
+              lead={
+                <>
+                  Connect <strong>{nameOf(dailies.pathfinding.puzzle.start)}</strong> and{" "}
+                  <strong>{nameOf(dailies.pathfinding.puzzle.end)}</strong>: the shortest route has {dailies.pathfinding.puzzle.par}{" "}
+                  countries in between.
+                </>
+              }
               onPlay={(replay) => startDaily("pathfinding", replay)}
             />
           )}

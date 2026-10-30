@@ -7,10 +7,10 @@ import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadC
 import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, type Guess } from "./CountryGuesser";
 import { letterCount, letterPattern } from "@/components/game/HintPanel";
 import { buildBorderGraph, pickRoute, routeFrontier } from "@/utils/pathfinding";
-import { dailyGuessing, dailyPathfinding } from "@/utils/dailySeed";
+import { dailyGuessing, dailyPathfinding, dateKey } from "@/utils/dailySeed";
 import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
 import { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
-import { CONTINENTS, LOGO_SRC } from "./CountryGuesser";
+import { CONTINENTS, GUESSING_POOL, LOGO_SRC } from "./CountryGuesser";
 
 // Count ClayCard renders: ClayCard is a plain child of CountryGuesser, so it
 // re-renders exactly when CountryGuesser does. Used to prove timer ticks don't.
@@ -795,11 +795,24 @@ describe("Daily Challenges", () => {
   const graph = buildBorderGraph(countries);
   const nameOf = (code: string) => byCode.get(code)!.name;
   const leads = () => [card("guessing"), card("pathfinding")].map((c) => c.querySelector(".card-lead")!.textContent);
+  /** A Daily Guessing round's title and its card's lead. */
+  const roundInfo = (key: string) => {
+    const empire = empires.find((e) => e.key === key);
+    if (empire) return { title: empire.title, lead: `Name all ${empire.codes.length} modern countries on the ${empire.title} list.` };
+    if (key === "World") return { title: "World", lead: `Name all ${countries.length} countries in the World.` };
+    return { title: key, lead: `Name all ${inRegion(key).length} countries in ${key === "Americas" ? "the " : ""}${key}.` };
+  };
+  /** The first date from October 2026 whose Daily Guessing round passes `test`. */
+  const dateWhere = (test: (round: string) => boolean) => {
+    for (let i = 0; ; i++) {
+      const date = dateKey(new Date(2026, 9, 1 + i));
+      if (test(dailyGuessing(date, GUESSING_POOL).round)) return date;
+    }
+  };
   const expectedLeads = (date: string) => {
     const { puzzle } = dailyPathfinding(date, graph)!;
-    const { continent } = dailyGuessing(date, CONTINENTS);
     return [
-      `Name every country in ${continent === "Americas" ? "the Americas" : continent}.`,
+      roundInfo(dailyGuessing(date, GUESSING_POOL).round).lead,
       `Connect ${nameOf(puzzle.start)} and ${nameOf(puzzle.end)}: the shortest route has ${puzzle.par} countries in between.`,
     ];
   };
@@ -824,13 +837,24 @@ describe("Daily Challenges", () => {
     expect($(".daily-badge")!.textContent).toBe("Daily");
   });
 
-  it("Daily Guessing starts that date's seeded continent, in Countries mode even if Capitals is selected", async () => {
+  it("Daily Guessing starts that date's seeded round, in Countries mode even if Capitals is selected", async () => {
     const date = "2026-10-29";
     openOn(date);
     clickButton("Capitals");
     await play("guessing");
-    expect($("h1")!.textContent).toBe(`${dailyGuessing(date, CONTINENTS).continent}Daily`);
+    expect($("h1")!.textContent).toBe(`${roundInfo(dailyGuessing(date, GUESSING_POOL).round).title}Daily`);
     expect(input().placeholder).toBe("Type a country");
+  });
+
+  it("Daily Guessing deals empires and the World as well as continents", async () => {
+    for (const date of [dateWhere((r) => empires.some((e) => e.key === r)), dateWhere((r) => r === "World")]) {
+      const { round } = dailyGuessing(date, GUESSING_POOL);
+      openOn(date);
+      await act(async () => {});
+      expect(leads()[0]).toBe(roundInfo(round).lead);
+      await play("guessing");
+      expect($("h1")!.textContent).toBe(`${roundInfo(round).title}Daily`);
+    }
   });
 
   it("shares a spoiler-free Daily Pathfinding result", async () => {
@@ -844,9 +868,9 @@ describe("Daily Challenges", () => {
     for (const c of countries) expect(text).not.toContain(c.name);
   });
 
-  it("shares Daily Guessing under its own title, with the continent on the stats line", async () => {
+  it("shares Daily Guessing under its own title, with the round on the stats line", async () => {
     const date = "2026-10-29";
-    const { continent } = dailyGuessing(date, CONTINENTS);
+    const continent = roundInfo(dailyGuessing(date, GUESSING_POOL).round).title;
     openOn(date);
     await play("guessing");
     wait(5_000);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import ClayButton from "@/components/ui/ClayButton";
 import ClayCard from "@/components/ui/ClayCard";
 import { dailyStats, listDailies, type DailyRecord } from "@/utils/db";
@@ -15,8 +15,8 @@ export const DAILY_TITLES: Record<DailyKind, string> = {
 
 type DailyCardProps<C extends string> = {
   challenge: DailyChallenge<C>;
-  /** Display name of a country code (route endpoints). */
-  nameOf: (code: string) => string;
+  /** What today's puzzle is, in a sentence: "Name all 54 countries in Africa." */
+  lead: ReactNode;
   /** Starts this daily. `replay`: today's result is already saved, so this play won't count. */
   onPlay: (replay: boolean) => void;
 };
@@ -41,7 +41,7 @@ export function dailyOutcome(record: DailyRecord): string {
  * this daily (played, completed, streaks), and once today's is played, its first result and
  * share text. Each daily keeps its own records, in the dailies store.
  */
-export default function DailyCard<C extends string>({ challenge, nameOf, onPlay }: DailyCardProps<C>) {
+export default function DailyCard<C extends string>({ challenge, lead, onPlay }: DailyCardProps<C>) {
   const { kind, date } = challenge;
   // undefined: still reading the profile. null: storage unavailable.
   const [records, setRecords] = useState<DailyRecord[] | null | undefined>(undefined);
@@ -59,18 +59,6 @@ export default function DailyCard<C extends string>({ challenge, nameOf, onPlay 
   const today = records?.find((r) => r.date === date) ?? null;
   const stats = records ? dailyStats(records, date) : null;
   const headingId = `daily-${kind}-heading`;
-  const what =
-    challenge.kind === "pathfinding" ? (
-      <>
-        Connect <strong>{nameOf(challenge.puzzle.start)}</strong> and <strong>{nameOf(challenge.puzzle.end)}</strong>: the
-        shortest route has {challenge.puzzle.par} countries in between.
-      </>
-    ) : (
-      <>
-        Name every country in {challenge.continent === "Americas" && "the "}
-        <strong>{challenge.continent}</strong>.
-      </>
-    );
 
   return (
     <ClayCard as="section" className="daily-card" data-kind={kind} aria-labelledby={headingId}>
@@ -78,7 +66,7 @@ export default function DailyCard<C extends string>({ challenge, nameOf, onPlay 
         <h3 id={headingId} className="card-title">
           {DAILY_TITLES[kind]}
         </h3>
-        <p className="card-lead">{what}</p>
+        <p className="card-lead">{lead}</p>
         {today && <p className="daily-card__done">Done today: {dailyOutcome(today)}.</p>}
         {stats && stats.played > 0 && (
           <dl className="daily-stats" aria-label={`${DAILY_TITLES[kind]} stats`}>

@@ -191,7 +191,8 @@ describe("Phase 6 records", () => {
     const guessing = () => $('.daily-card[data-kind="guessing"]')!;
     await eventually(() => expect(guessing().querySelector(".daily-card__done")?.textContent).toMatch(/^Done today: 0\/\d+ in \d\d:\d\d \(gave up\)\.$/));
     expect(guessing().querySelector(".share-button")).not.toBeNull();
-    expect(text('.daily-card[data-kind="guessing"] .daily-stats > div')).toEqual(["Played1", "Completed0", "Streak0", "Best0"]);
+    // A give-up is still a day played: it starts a streak, but isn't a completion.
+    expect(text('.daily-card[data-kind="guessing"] .daily-stats > div')).toEqual(["Played1", "Completed0", "Streak1", "Best1"]);
     expect($('.daily-card[data-kind="pathfinding"] .daily-card__done')).toBeNull();
     expect($('.daily-card[data-kind="pathfinding"] .daily-stats')).toBeNull(); // nothing played yet
 

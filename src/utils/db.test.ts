@@ -254,7 +254,7 @@ describe("dailyStats", () => {
     expect(stats).toMatchObject({ played: 3, won: 2 });
   });
 
-  it("a streak is consecutive days completed, up to today", () => {
+  it("a streak is consecutive days played, up to today", () => {
     const records = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29"].map((d) => rec(d));
     expect(dailyStats(records, "2026-10-29")).toMatchObject({ streak: 4, bestStreak: 4 });
   });
@@ -266,15 +266,14 @@ describe("dailyStats", () => {
     expect(dailyStats(records, "2026-10-30").bestStreak).toBe(2);
   });
 
-  it("a give-up ends a streak; the best streak remembers the longest run", () => {
-    const records = [
-      rec("2026-09-01"),
-      rec("2026-09-02"),
-      rec("2026-09-03"),
-      rec("2026-09-04", "forfeited"),
-      rec("2026-09-05"),
-    ];
-    expect(dailyStats(records, "2026-09-05")).toEqual({ played: 5, won: 4, streak: 1, bestStreak: 3 });
+  it("a give-up still counts as a day played: it keeps the streak going, but isn't a completion", () => {
+    const records = [rec("2026-09-01"), rec("2026-09-02", "forfeited"), rec("2026-09-03", "forfeited"), rec("2026-09-04")];
+    expect(dailyStats(records, "2026-09-04")).toEqual({ played: 4, won: 2, streak: 4, bestStreak: 4 });
+  });
+
+  it("the best streak remembers the longest run of days played", () => {
+    const records = [rec("2026-09-01"), rec("2026-09-02", "forfeited"), rec("2026-09-03"), rec("2026-09-05")];
+    expect(dailyStats(records, "2026-09-05")).toEqual({ played: 4, won: 3, streak: 1, bestStreak: 3 });
   });
 
   it("runs across month and year ends", () => {

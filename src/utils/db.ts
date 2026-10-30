@@ -371,32 +371,35 @@ export function summarize(rounds: readonly RoundRecord[]): ProfileSummary {
 }
 
 export type DailyStats = {
+  /** Days played: started and finished, given up or not. */
   played: number;
   /** Completed: every country named, or the route connected. */
   won: number;
-  /** Days in a row completed, up to today (or up to yesterday, while today is still open). */
+  /** Days in a row played, up to today (or up to yesterday, while today is still open). */
   streak: number;
   bestStreak: number;
 };
 
 /**
- * Stats for one daily. A streak is consecutive calendar days completed: a give-up or a
- * missed day ends it. Today not played yet doesn't end it; it's still open until midnight.
+ * Stats for one daily. A streak is consecutive calendar days played: a day counts once its
+ * daily is finished, completed or given up, so only a missed day ends a streak. Today not
+ * played yet doesn't end it; it's still open until midnight. Completions are counted apart.
  */
 export function dailyStats(records: readonly DailyRecord[], today: string): DailyStats {
-  const won = new Set(records.filter((r) => r.result === "won").map((r) => r.date));
+  const played = new Set(records.map((r) => r.date));
   let bestStreak = 0;
-  for (const date of won) {
-    if (won.has(addDays(date, -1))) continue; // not the first day of a run
+  for (const date of played) {
+    if (played.has(addDays(date, -1))) continue; // not the first day of a run
     let length = 1;
-    while (won.has(addDays(date, length))) length++;
+    while (played.has(addDays(date, length))) length++;
     bestStreak = Math.max(bestStreak, length);
   }
   let streak = 0;
-  let day = won.has(today) ? today : addDays(today, -1);
-  while (won.has(day)) {
+  let day = played.has(today) ? today : addDays(today, -1);
+  while (played.has(day)) {
     streak++;
     day = addDays(day, -1);
   }
-  return { played: new Set(records.map((r) => r.date)).size, won: won.size, streak, bestStreak };
+  const won = new Set(records.filter((r) => r.result === "won").map((r) => r.date));
+  return { played: played.size, won: won.size, streak, bestStreak };
 }

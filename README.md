@@ -39,7 +39,7 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
 | `src/utils/fuzzyMatch.ts` | Matching: `normalize`, `buildIndex` (country names, or capitals with `"capitals"`), `matchCountry`, `liveMatch` (per-keystroke rules), `suggestCountries` (autocomplete ranking), `answerForInput`, and the `Country` type. |
 | `src/utils/haptics.ts` | `vibrate()` (30 ms, feature-checked, never throws), `canVibrate()` and `hapticsUseful()` (the API exists and the pointer is coarse). |
-| `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD), the two dailies (`dailyGuessing`, `dailyPathfinding`, each with its own seed), and local-midnight helpers (`startOfLocalDay`, `nextLocalMidnight`, `addDays`). |
+| `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD), the two dailies (`dailyGuessing`, `dailyPathfinding`, each with its own seed), and local-midnight and calendar helpers (`startOfLocalDay`, `nextLocalMidnight`, `addDays`, `dayNumber`). Daily Guessing is dealt from a seeded deck (see Daily Challenges). |
 | `src/utils/share.ts` | Spoiler-free share text: `routeGrid`, `paceGrid`, `buildShareText`. |
 | `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, version 3, stores `rounds`, `settings`, `party` and `dailies`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, `savePartyResult`/`listPartyResults`, `saveDaily`/`listDailies`, and the pure `summarize` and `dailyStats`. Upgrading keeps existing rounds and settings, and version 3 copies the dailies already played into `dailies`. Every call fails soft when storage is unavailable. |
 | `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and the free-roam rules: `routeFrontier` (what may be named next), `routeComplete` (the named countries join the two ends) and `detourOf` (for the share grid). |
@@ -149,17 +149,19 @@ Two dailies, side by side on the setup screen, each with its own seed and its ow
 
 | | Daily Guessing | Daily Pathfinding |
 | --- | --- | --- |
-| Puzzle | Name every country in one continent (always Countries, even if Capitals is selected) | Connect two countries, 3–7 apart |
-| Seed | `guess:YYYY-MM-DD` | `route:YYYY-MM-DD` |
+| Puzzle | Name every country in one round from an 11-round pool: the 5 continents, the 5 empires and the World (always Countries, even if Capitals is selected) | Connect two countries, 3–7 apart |
+| Seed | `guess-deck:<pool size>:<cycle>` (one shuffle per 11-day cycle) | `route:YYYY-MM-DD` |
 | Shared as | `geotag - Daily Guessing 2026-10-29` | `geotag - Daily Pathfinding 2026-10-29` |
 
-`dailySeed.ts` hashes `geotag:<seed>` (FNV-1a; the salt is `DAILY_SALT` and must not change once the game is live) into a Mulberry32 seed. Choices are drawn only from sorted lists, so every browser on the same date gets the same puzzles, whatever its locale or the order the data arrived in. Separate seeds mean a change to how routes are picked never changes the continent, and the other way round.
+`dailySeed.ts` hashes `geotag:<seed>` (FNV-1a; the salt is `DAILY_SALT` and must not change once the game is live) into a Mulberry32 seed. Choices are drawn only from sorted lists, so every browser on the same date gets the same puzzles, whatever its locale or the order the data arrived in. Separate seeds mean a change to how routes are picked never changes the round, and the other way round.
+
+**Dealing Daily Guessing (`dailyGuessing`):** the pool (`GUESSING_POOL` in `CountryGuesser.tsx`) is dealt like a shuffled deck. The calendar is cut into 11-day cycles (`dayNumber`, a time-zone-free day count); each cycle gets its own shuffle and each day takes the next card, so every round comes up exactly once per cycle. Where one deck meets the next, the last third of the old deck (3 rounds) may not open the new one: any that would are swapped with cards from the middle. So a round never comes back within 3 days (the closest repeat is 4 days apart), and since those swaps never touch a deck's last cards, each day is computed from two shuffles, never a chain back through the calendar. Adding or removing a round reshuffles every future Daily Guessing.
 
 - **One data set:** both dailies are drawn from, and played on, the same bundled `countries.json` as every other round. Nothing is fetched, so every player of the same deployment gets the same puzzles.
 - **Local midnight:** both unlock at the player's local midnight (`nextLocalMidnight`, built on `setHours(0, 0, 0, 0)`), not 24 hours after the last play. The setup screen rolls over to the new day on its own: a timer is set for the next midnight, and because timers stall while a device sleeps, the date is checked again whenever the page comes back into view. Pressing Play on a screen left open past midnight shows the new dailies instead of starting yesterday's.
 - **Which day a result belongs to:** the puzzle's date, taken when the daily starts. A daily started at 23:58 and finished at 00:03 is yesterday's result, so it can't lock you out of today's puzzle.
 - **Records:** the first finished attempt per daily and date goes into the `dailies` store (key `guessing:2026-10-29` or `pathfinding:2026-10-29`, written with `add`, so a second attempt can't replace it); the round is also saved to the profile as usual. **Play again** replays the same puzzle as an ordinary round (not tagged Daily, not shared as Daily).
-- **Stats per daily:** played, completed, current streak and best streak. A streak is consecutive calendar days completed; a give-up or a missed day ends it, and today still unplayed doesn't (it's open until midnight). Clear history clears these too.
+- **Stats per daily:** played, completed, current streak and best streak. A streak is consecutive calendar days **played**: a day counts once its daily is started and finished, completed or given up. Only a missed day ends a streak, and today still unplayed doesn't (it's open until midnight). Completions are counted separately. Clear history clears these too.
 - **Upgrading:** version 3 of the database copies every daily already in the profile into the new store: Pathfinding rounds to Daily Pathfinding, the rest to Daily Guessing.
 
 ## Challenge links and QR sharing
@@ -344,7 +346,9 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 - "Average time per mode" mixes round sizes: a Continents average blends Oceania (14) and Africa (54). Seconds per country and personal bests are the comparable numbers.
 - Suggestions don't narrow the answers down, but they still jog your memory ("b" lists every B country), so assisted times aren't comparable with unassisted ones. Use the filter.
 - The dailies are identical for everyone running the same deployment: they use the bundled `countries.json`, so refreshing it (`npm run snapshot`) and redeploying can change future dailies. Do that between days, not mid-day.
-- Daily Guessing draws from the 5 continents, so there are only 5 distinct puzzles and the same one can come up two days running. Widening the pool (empires, World) would change every future Daily Guessing.
+- Daily Guessing's rounds vary a lot in size: the Mughal day is 4 countries (seconds), the World day is 195 (often 20+ minutes). Each comes up once every 11 days.
+- Streaks count days played, so an instant Give Up keeps one alive. Completed is the number that shows skill.
+- Within a cycle, a player who has seen ten of the eleven rounds knows the eleventh. It doesn't make naming the countries any easier.
 - "Same for everyone" means the same local date. Players east of you get the next puzzle first and can share it before you've played.
 - Disputed capitals follow the data: Israel's is Jerusalem, and Palestine's accepts Ramallah or East Jerusalem.
 - The brand name lives in one constant, `BRAND_NAME` in `src/utils/share.ts`: the page `<title>`, the header and the share text all read it. The IndexedDB database keeps its original internal name (`country-recall`) so existing saved profiles aren't lost; players never see it.
