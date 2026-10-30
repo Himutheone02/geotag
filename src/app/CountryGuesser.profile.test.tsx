@@ -8,7 +8,19 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import { getSetting, listPartyResults, listRounds, resetDbConnection, saveRound, type RoundRecord } from "@/utils/db";
+import {
+  dailyId,
+  getSetting,
+  listDailies,
+  listPartyResults,
+  listRounds,
+  resetDbConnection,
+  saveDaily,
+  saveRound,
+  type DailyRecord,
+  type RoundRecord,
+} from "@/utils/db";
+import { addDays, dateKey } from "@/utils/dailySeed";
 import CountryGuesser from "./CountryGuesser";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -95,7 +107,7 @@ describe("saving rounds", () => {
     typeKeys("Fiji"); // accepted
     typeKeys("Narnia");
     pressEnter(); // rejected, but still a guess
-    clickButton("Get a hint");
+    clickButton("Capital City");
     const before = Date.now();
     clickButton("Forfeit");
 
@@ -158,22 +170,30 @@ describe("Phase 6 records", () => {
     expect(saved.share).toMatch(/^geotag - Oceania Capitals\n🏙️ 1\/14 🏳️/);
   });
 
-  it("after today's daily, the card shows the result, shares it, and a replay isn't the daily", async () => {
-    await eventually(() => expect($("button.clay-button")?.textContent).toBeTruthy());
-    await eventually(() => {
-      const play = $$("button").find((b) => b.textContent === "Play today's challenge") as HTMLButtonElement | undefined;
-      expect(play?.disabled).toBe(false);
-    });
-    clickButton("Play today's challenge");
+  const playButton = (kind: string) =>
+    $$(`.daily-card[data-kind="${kind}"] button`).find((b) => /^Play/.test(b.textContent ?? "")) as HTMLButtonElement | undefined;
+
+  it("after today's Daily Guessing, its card shows the result and stats, shares it, and a replay isn't the daily", async () => {
+    await eventually(() => expect(playButton("guessing")?.disabled).toBe(false));
+    expect(playButton("guessing")!.textContent).toBe("Play");
+    act(() => playButton("guessing")!.click());
     clickButton("Forfeit");
-    await eventually(async () => expect(await listRounds()).toHaveLength(1));
+    await eventually(async () => expect(await listDailies("guessing")).toHaveLength(1));
     const [first] = (await listRounds())!;
-    expect(first.daily).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(first.share).toContain(`Daily`);
+    expect(first.daily).toBe(dateKey());
+    expect(first.share).toContain(`Daily Guessing ${dateKey()}`);
+    const [saved] = (await listDailies("guessing"))!;
+    expect(saved).toMatchObject({ id: dailyId("guessing", dateKey()), kind: "guessing", date: dateKey(), result: "forfeited", correct: 0 });
+    expect(saved.startedAt).toBeLessThanOrEqual(saved.finishedAt);
+    expect(await listDailies("pathfinding")).toEqual([]); // the other daily is untouched
 
     clickButton("Choose another round");
-    await eventually(() => expect($(".daily-card__done")?.textContent).toMatch(/^Done today: /));
-    expect($(".daily-card .share-button")).not.toBeNull();
+    const guessing = () => $('.daily-card[data-kind="guessing"]')!;
+    await eventually(() => expect(guessing().querySelector(".daily-card__done")?.textContent).toMatch(/^Done today: 0\/\d+ in \d\d:\d\d \(gave up\)\.$/));
+    expect(guessing().querySelector(".share-button")).not.toBeNull();
+    expect(text('.daily-card[data-kind="guessing"] .daily-stats > div')).toEqual(["Played1", "Completed0", "Streak0", "Best0"]);
+    expect($('.daily-card[data-kind="pathfinding"] .daily-card__done')).toBeNull();
+    expect($('.daily-card[data-kind="pathfinding"] .daily-stats')).toBeNull(); // nothing played yet
 
     clickButton("Play again");
     clickButton("Forfeit");
@@ -181,6 +201,33 @@ describe("Phase 6 records", () => {
     const [replay] = (await listRounds())!;
     expect(replay.daily).toBeNull();
     expect(replay.share).not.toContain("Daily");
+    expect(await listDailies("guessing")).toHaveLength(1); // still the first attempt
+  });
+
+  it("each daily keeps its own streak", async () => {
+    const today = dateKey();
+    const won = (kind: DailyRecord["kind"], date: string): DailyRecord => ({
+      id: dailyId(kind, date),
+      kind,
+      date,
+      result: "won",
+      timeMs: 1_000,
+      startedAt: 0,
+      finishedAt: 1_000,
+      label: "x",
+      correct: 1,
+      target: 1,
+      moves: kind === "pathfinding" ? 5 : null,
+      par: kind === "pathfinding" ? 5 : null,
+      hintsUsed: 0,
+    });
+    for (const days of [1, 2, 3]) await saveDaily(won("pathfinding", addDays(today, -days)));
+    await saveDaily(won("guessing", addDays(today, -1)));
+    unmount();
+    mount();
+    await eventually(() => expect(text('.daily-card[data-kind="pathfinding"] .daily-stats > div')).toEqual(["Played3", "Completed3", "Streak3", "Best3"]));
+    expect(text('.daily-card[data-kind="guessing"] .daily-stats > div')).toEqual(["Played1", "Completed1", "Streak1", "Best1"]);
+    expect(playButton("pathfinding")!.textContent).toBe("Play"); // today's still open
   });
 });
 
@@ -189,17 +236,21 @@ describe("Phase 7: recall data, heatmap and stamps", () => {
     clickButton("Oceania");
     await new Promise((resolve) => setTimeout(resolve, 30));
     typeKeys("Fiji");
-    for (let i = 0; i < 3; i++) clickButton("Get a hint"); // stage 3: every missing initial is showing
-    typeKeys("Tonga");
-    typeKeys("sam");
-    act(() => $$("[role=option]").find((o) => o.textContent === "Samoa")!.click());
+    clickButton("Capital City"); // about one missing country: naming that one counts as hinted
+    const hint = $(".hint-text")!.textContent!;
+    const hinted = countries.find((c) => c.region === "Oceania" && c.capitals.length > 0 && hint.includes(` ${c.capitals.join(", ")}.`))!;
+    typeKeys(hinted.name);
+    if (input().value) pressEnter();
+    const other = hinted.code === "WSM" ? { code: "TON", typed: "ton", label: "Tonga" } : { code: "WSM", typed: "sam", label: "Samoa" };
+    typeKeys(other.typed);
+    act(() => $$("[role=option]").find((o) => o.textContent === other.label)!.click());
     clickButton("Forfeit");
     await eventually(async () => expect(await listRounds()).toHaveLength(1));
     const [saved] = (await listRounds())!;
     expect(saved.answers!.map((a) => [a.code, a.hinted, a.picked])).toEqual([
       ["FJI", false, false],
-      ["TON", true, false],
-      ["WSM", true, true],
+      [hinted.code, true, false],
+      [other.code, false, true], // named after the hint, but the hint wasn't about it
     ]);
     expect(saved.answers![0].ms).toBeGreaterThanOrEqual(25);
     expect(saved.answers!.every((a) => a.ms >= 0)).toBe(true);
@@ -305,7 +356,7 @@ describe("Profile & Stats tab", () => {
     await saveRound(record({}));
     await openProfile();
     clickButton("Clear history");
-    expect($("[role=alert]")!.textContent).toBe("Delete all 1 saved round? This can't be undone.");
+    expect($("[role=alert]")!.textContent).toBe("Delete all 1 saved round and your daily streaks? This can't be undone.");
     clickButton("Keep it");
     expect($$(".history-row")).toHaveLength(1);
     clickButton("Clear history");

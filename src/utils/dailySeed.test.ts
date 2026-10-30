@@ -2,7 +2,17 @@ import { describe, expect, it } from "vitest";
 import snapshot from "@/data/countries.json";
 import { toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import { CONTINENTS } from "@/app/CountryGuesser";
-import { dailyChallenge, dateKey, hashString, mulberry32, seededRandom } from "./dailySeed";
+import {
+  addDays,
+  dailyGuessing,
+  dailyPathfinding,
+  dateKey,
+  hashString,
+  mulberry32,
+  nextLocalMidnight,
+  seededRandom,
+  startOfLocalDay,
+} from "./dailySeed";
 import { bfsDistances, buildBorderGraph, MAX_PAR, MIN_PAR } from "./pathfinding";
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
@@ -56,34 +66,68 @@ describe("dateKey", () => {
   });
 });
 
-describe("dailyChallenge", () => {
-  it("gives the same challenge for the same date, even with the graph built in another order", () => {
-    const reversed = buildBorderGraph([...countries].reverse());
-    for (const date of ["2026-10-26", "2026-10-27", "2027-02-28", "2028-02-29"]) {
-      expect(dailyChallenge(date, reversed, CONTINENTS)).toEqual(dailyChallenge(date, graph, CONTINENTS));
+describe("local midnight", () => {
+  it("startOfLocalDay is setHours(0, 0, 0, 0) of the same day", () => {
+    const at = new Date(2026, 9, 29, 15, 42, 7, 123).getTime();
+    expect(startOfLocalDay(at)).toBe(new Date(2026, 9, 29).getTime());
+    expect(startOfLocalDay(new Date(2026, 9, 29).getTime())).toBe(new Date(2026, 9, 29).getTime());
+  });
+
+  it("nextLocalMidnight is the start of the next calendar day", () => {
+    expect(nextLocalMidnight(new Date(2026, 9, 29, 23, 59, 59, 999).getTime())).toBe(new Date(2026, 9, 30).getTime());
+    expect(nextLocalMidnight(new Date(2026, 9, 29).getTime())).toBe(new Date(2026, 9, 30).getTime());
+    expect(nextLocalMidnight(new Date(2026, 11, 31, 12).getTime())).toBe(new Date(2027, 0, 1).getTime());
+  });
+
+  it("stays on midnight across a daylight-saving change (any time zone)", () => {
+    // Walk a year of days: the next midnight is always local 00:00:00 of the next date.
+    for (let i = 0; i < 366; i++) {
+      const noon = new Date(2026, 0, 1 + i, 12).getTime();
+      const next = new Date(nextLocalMidnight(noon));
+      expect([next.getHours(), next.getMinutes(), next.getSeconds()]).toEqual([0, 0, 0]);
+      expect(dateKey(next)).toBe(dateKey(new Date(2026, 0, 2 + i)));
     }
   });
 
-  it("mixes routes and continents across a year, routes always in the difficulty band", () => {
-    const kinds = { pathfinding: 0, continent: 0 };
-    const pairs = new Set<string>();
-    const day = new Date(2026, 0, 1);
-    for (let i = 0; i < 365; i++) {
-      const date = dateKey(new Date(day.getFullYear(), day.getMonth(), day.getDate() + i));
-      const challenge = dailyChallenge(date, graph, CONTINENTS);
-      kinds[challenge.kind]++;
-      if (challenge.kind === "pathfinding") {
-        const { start, end, par } = challenge.puzzle;
-        expect(par).toBeGreaterThanOrEqual(MIN_PAR);
-        expect(par).toBeLessThanOrEqual(MAX_PAR);
-        expect(bfsDistances(graph, start).get(end)! - 1).toBe(par);
-        pairs.add(`${start}-${end}`);
-      } else {
-        expect(CONTINENTS).toContain(challenge.continent);
-      }
+  it("addDays moves by calendar days", () => {
+    expect(addDays("2026-10-29", 1)).toBe("2026-10-30");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDays("2028-03-01", -1)).toBe("2028-02-29");
+    expect(addDays("2026-10-29", -365)).toBe("2025-10-29");
+  });
+});
+
+describe("the two dailies", () => {
+  it("are the same for the same date, even with the graph built in another order", () => {
+    const reversed = buildBorderGraph([...countries].reverse());
+    for (const date of ["2026-10-26", "2026-10-27", "2027-02-28", "2028-02-29"]) {
+      expect(dailyPathfinding(date, reversed)).toEqual(dailyPathfinding(date, graph));
+      expect(dailyGuessing(date, [...CONTINENTS].reverse())).toEqual(dailyGuessing(date, CONTINENTS));
     }
-    expect(kinds.pathfinding).toBeGreaterThan(140);
-    expect(kinds.continent).toBeGreaterThan(140);
-    expect(pairs.size).toBeGreaterThan(kinds.pathfinding * 0.9); // routes rarely repeat
+  });
+
+  it("use separate seeds: the route and the continent don't share a random stream", () => {
+    expect(seededRandom("guess:2026-10-29")()).not.toBe(seededRandom("route:2026-10-29")());
+  });
+
+  it("give a route every day, always in the difficulty band, and every continent comes up", () => {
+    const pairs = new Set<string>();
+    const continents = new Map<string, number>();
+    for (let i = 0; i < 365; i++) {
+      const date = dateKey(new Date(2026, 0, 1 + i));
+      const route = dailyPathfinding(date, graph)!;
+      expect(route.kind).toBe("pathfinding");
+      const { start, end, par } = route.puzzle;
+      expect(par).toBeGreaterThanOrEqual(MIN_PAR);
+      expect(par).toBeLessThanOrEqual(MAX_PAR);
+      expect(bfsDistances(graph, start).get(end)! - 1).toBe(par);
+      pairs.add(`${start}-${end}`);
+      const guessing = dailyGuessing(date, CONTINENTS);
+      expect(guessing.kind).toBe("guessing");
+      continents.set(guessing.continent, (continents.get(guessing.continent) ?? 0) + 1);
+    }
+    expect(pairs.size).toBeGreaterThan(365 * 0.9); // routes rarely repeat
+    expect([...continents.keys()].sort()).toEqual([...CONTINENTS].sort());
+    for (const n of continents.values()) expect(n).toBeGreaterThan(40);
   }, 30_000);
 });

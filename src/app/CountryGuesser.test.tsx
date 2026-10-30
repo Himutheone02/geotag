@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, type Guess } from "./CountryGuesser";
-import { buildBorderGraph, pickRoute } from "@/utils/pathfinding";
-import { dailyChallenge, dateKey } from "@/utils/dailySeed";
+import { letterCount, letterPattern } from "@/components/game/HintPanel";
+import { buildBorderGraph, pickRoute, routeFrontier } from "@/utils/pathfinding";
+import { dailyGuessing, dailyPathfinding } from "@/utils/dailySeed";
 import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
 import { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
 import { CONTINENTS, LOGO_SRC } from "./CountryGuesser";
@@ -86,6 +87,11 @@ function typeKeys(text: string) {
   }
 }
 const pressEnter = () => act(() => $<HTMLButtonElement>("button[type=submit]")!.click());
+const clearInput = () =>
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), "");
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+  });
 
 describe("setup", () => {
   it("offers each continent with its country count, and no timer yet", () => {
@@ -228,59 +234,65 @@ async function loadMap() {
   });
   await act(async () => {});
 }
-const hintButton = () => [...container.querySelectorAll("button")].find((b) => /hint/i.test(b.textContent ?? ""))!;
-const hints = () => [...container.querySelectorAll(".hint-list > .hint")].map((li) => li.textContent?.trim() ?? "");
+const hintButton = () => $<HTMLButtonElement>(".hint-card button");
+/** What each hint given so far says (without its name). */
+const hints = () => [...container.querySelectorAll(".hint-list > .hint .hint-text")].map((t) => t.textContent?.trim() ?? "");
 const byCode = new Map(countries.map((c) => [c.code, c]));
+/** The country a Capital City hint is about, found from the capital it gives. */
+const capitalHintCountry = (text: string, pool = countries) =>
+  pool.find((c) => c.capitals.length > 0 && text.includes(` ${c.capitals.join(", ")}.`))!;
 
 describe("hints", () => {
+  const europe = inRegion("Europe");
   beforeEach(() => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     clickButton("Europe");
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("starts with 0 of 3 used", () => {
-    expect(hintButton().textContent).toBe("Get a hint (0/3)");
+  it("offers two hints, Capital City then First Letter", () => {
+    expect(hintButton()!.textContent).toBe("Capital City (0/2)");
     expect(hints()).toEqual([]);
+    expect($(".hint-card .card-lead")!.textContent).toContain("Capital City gives you the capital of a country you're missing");
   });
 
-  it("stage 1 names the land neighbours of one missing country; stage 2 pulses that country", async () => {
-    await loadMap();
-    clickButton("Get a hint");
-    expect(hintButton().textContent).toBe("Get a hint (1/3)");
-    expect(hints()[0]).toMatch(/^A missing country borders .+\.$/);
-    clickButton("Get a hint");
-    expect(hints()[1]).toBe("Its outline is pulsing on the map.");
-    const hinted = byCode.get($(".map-hint")!.getAttribute("data-code")!)!;
-    const neighbourNames = hinted.borders.flatMap((b) => byCode.get(b)?.name ?? []);
-    for (const name of neighbourNames) expect(hints()[0]).toContain(name);
+  it("Capital City gives the capital of a missing country; First Letter spells out that country", () => {
+    clickButton("Capital City");
+    expect(hintButton()!.textContent).toBe("First Letter (1/2)");
+    expect(hints()[0]).toMatch(/^One missing country has the capitals? .+\.$/);
+    const target = capitalHintCountry(hints()[0], europe);
+    expect(target).toBeDefined();
+    clickButton("First Letter");
+    const pattern = $(".letter-pattern")!;
+    expect(pattern.textContent).toBe(letterPattern(target.name));
+    expect(pattern.getAttribute("aria-hidden")).toBe("true");
+    expect(hints()[1]).toContain(`That country: ${letterPattern(target.name)}`);
+    expect(hints()[1]).toContain(`starts with ${target.name[0]}, ${letterCount(target.name)} letters`); // for screen readers
+    expect(hintButton()!.textContent).toBe("No hints left (2/2)");
+    expect(hintButton()!.disabled).toBe(true);
   });
 
-  it("stage 3 lists the initials of every missing country and updates as you play", () => {
-    clickButton("Get a hint");
-    clickButton("Get a hint");
-    clickButton("Get a hint");
-    expect(container.querySelectorAll(".initial")).toHaveLength(45);
-    typeKeys("France");
-    expect(container.querySelectorAll(".initial")).toHaveLength(44);
-    expect(hintButton().textContent).toBe("No hints left (3/3)");
-    expect(hintButton().disabled).toBe(true);
-  });
-
-  it("naming the hinted country confirms it and stops the pulse", async () => {
-    await loadMap();
-    clickButton("Get a hint");
-    clickButton("Get a hint");
-    const hinted = byCode.get($(".map-hint")!.getAttribute("data-code")!)!;
-    typeKeys(hinted.name);
+  it("says when the hinted country is found, and First Letter then moves to another missing country", () => {
+    clickButton("Capital City");
+    const target = capitalHintCountry(hints()[0], europe);
+    typeKeys(target.name);
     if (input().value) pressEnter(); // a name that starts another country's waits for Enter
-    expect(hints()[0]).toContain(`You found it: ${hinted.name}.`);
-    expect($(".map-hint")).toBeNull();
-    expect($(`.map-named[data-code="${hinted.code}"]`)).not.toBeNull();
+    expect(hints()[0]).toContain(`Found: ${target.name}.`);
+    clickButton("First Letter");
+    expect(hints()[1]).toMatch(/^A missing country: /); // not "That country": it's already found
+  });
+
+  it("never marks the map during a round: no hint layer, no tappable countries", async () => {
+    await loadMap();
+    clickButton("Capital City");
+    clickButton("First Letter");
+    expect($(".map-hint, .map-revealed")).toBeNull();
+    expect($(".world-map")!.hasAttribute("data-interactive")).toBe(false);
+    expect($(".world-map")!.hasAttribute("data-fog")).toBe(false); // fog is Pathfinding only
   });
 
   it("reports hints used in the result", () => {
-    clickButton("Get a hint");
+    clickButton("Capital City");
     clickButton("Forfeit");
     expect($(".card-lead")!.textContent).toBe("You forfeited at 00:00, with 1 hint. Here are the 45 you missed.");
   });
@@ -387,46 +399,114 @@ describe("Pathfinding", () => {
     expect($(".continent-button")!.textContent).toBe("StartRandom route, 3–7 countries apart");
   });
 
-  it("starts at the start country with 0 moves, the route listed, and no hint panel", () => {
+  it("starts with only the two ends: 0 moves, a two-ended prompt, and map hints", () => {
     clickButton("Start");
     expect($("h1")!.textContent).toBe(`${name(puzzle.start)} to ${name(puzzle.end)}`);
     expect(moves()).toBe("0 moves");
-    expect(prompt()).toBe(`You're in ${name(puzzle.start)}. Name a country that borders it.`);
+    expect(prompt()).toBe(
+      `Connect ${name(puzzle.start)} and ${name(puzzle.end)}. Name any country that borders either one, or a country you've named.`,
+    );
     expect(routeChips()).toEqual([name(puzzle.start), name(puzzle.end)]);
-    expect(hintButton()).toBeUndefined();
+    expect(hintButton()!.textContent).toBe("Reveal Adjacent (0/2)");
   });
 
-  it("accepts a bordering country as you type and moves you there", () => {
+  it("accepts a country that borders either end, and anything bordering a named country", () => {
     clickButton("Start");
-    step(puzzle.shortest[1]);
+    const nearEnd = [...graph.get(puzzle.end)!].sort()[0];
+    step(nearEnd); // from the destination's side
     expect(moves()).toBe("1 move");
-    expect(prompt()).toBe(`You're in ${name(puzzle.shortest[1])}. Name a country that borders it.`);
-    expect(routeChips()).toEqual([name(puzzle.start), name(puzzle.shortest[1]), name(puzzle.end)]);
+    expect(routeChips()).toEqual([name(puzzle.start), name(nearEnd), name(puzzle.end)]);
+    step(puzzle.shortest[1]); // from the start's side
+    expect(moves()).toBe("2 moves");
+    // A neighbour of the country just named, touching neither end.
+    const further = [...graph.get(nearEnd)!].find((c) => c !== puzzle.end && c !== puzzle.start && !graph.get(puzzle.end)!.has(c))!;
+    step(further);
+    expect(moves()).toBe("3 moves");
+    expect(routeChips()).toEqual([name(puzzle.start), name(nearEnd), name(puzzle.shortest[1]), name(further), name(puzzle.end)]);
   });
 
-  it("rejects a country that doesn't border where you are", () => {
+  it("dead ends are allowed, and each one is a move", () => {
     clickButton("Start");
-    const notNeighbour = countries.find((c) => c.code !== puzzle.start && !graph.get(puzzle.start)!.has(c.code) && c.name.length > 5)!;
+    const deadEnd = [...graph.get(puzzle.start)!].find((c) => !puzzle.shortest.includes(c))!;
+    step(deadEnd);
+    expect(feedback()).toMatch(/^Recognized: /);
+    expect(moves()).toBe("1 move");
+    expect(routeChips()).toContain(name(deadEnd));
+  });
+
+  it("rejects a country that borders nothing named yet", () => {
+    clickButton("Start");
+    const board = new Set([puzzle.start, puzzle.end]);
+    const notNeighbour = countries.find(
+      (c) => !board.has(c.code) && ![...board].some((b) => graph.get(b)!.has(c.code)) && c.name.length > 5,
+    )!;
     typeKeys(notNeighbour.name);
     pressEnter();
-    expect(feedback()).toBe(`${notNeighbour.name} doesn't border ${name(puzzle.start)}.`);
+    expect(feedback()).toBe(`${notNeighbour.name} doesn't border your route yet.`);
     expect(moves()).toBe("0 moves");
   });
 
-  it("says when you name the country you're already in", () => {
+  it("explains naming an end, or a country already on the route, without counting a move", () => {
     clickButton("Start");
     typeKeys(name(puzzle.start));
     wait(TYPO_ACCEPT_DELAY_MS + 50);
-    expect(feedback()).toBe(`You're already in ${name(puzzle.start)}.`);
+    if (input().value) pressEnter();
+    expect(feedback()).toBe(`${name(puzzle.start)} is where you start.`);
+    clearInput(); // the player deletes it
+    typeKeys(name(puzzle.end));
+    wait(TYPO_ACCEPT_DELAY_MS + 50);
+    if (input().value) pressEnter();
+    expect(feedback()).toBe(`${name(puzzle.end)} is your destination: connect to it.`);
+    clearInput();
+    step(puzzle.shortest[1]);
+    step(puzzle.shortest[1]);
+    expect(feedback()).toBe(`${name(puzzle.shortest[1])} is already on your route.`);
+    expect(moves()).toBe("1 move");
   });
 
-  it("stepping back cuts the route but still counts the move", () => {
+  it("completes when the named countries join up, whichever end they were built from", () => {
     clickButton("Start");
+    const between = puzzle.shortest.slice(1, -1);
+    // Alternate ends: first from the start, then from the destination, meeting in the middle.
+    const order: string[] = [];
+    for (let i = 0, j = between.length - 1; i <= j; i++, j--) {
+      order.push(between[i]);
+      if (j !== i) order.push(between[j]);
+    }
+    for (const code of order.slice(0, -1)) step(code);
+    expect($("#result-heading")).toBeNull(); // still one gap
+    step(order[order.length - 1]);
+    expect($("#result-heading")!.textContent).toBe(`You reached ${name(puzzle.end)}`);
+    expect(moves()).toBe(`${puzzle.par} moves`);
+  });
+
+  it("the map starts in fog; Reveal Adjacent outlines the live frontier, Reveal All lifts the fog", async () => {
+    clickButton("Start");
+    await loadMap();
+    const map = () => $(".world-map")!;
+    const outlined = () => container.querySelectorAll(".map-revealed path").length;
+    expect(map().getAttribute("data-fog")).toBe("true");
+    expect($(`.map-endpoint--start[data-code="${puzzle.start}"]`)).not.toBeNull();
+    expect($(`.map-endpoint--end[data-code="${puzzle.end}"]`)).not.toBeNull();
+    expect(outlined()).toBe(0);
+    clickButton("Reveal Adjacent");
+    expect(hints()[0]).toMatch(/^Every country that borders your route is outlined on the map/);
+    expect(outlined()).toBe(routeFrontier(graph, puzzle, []).size);
     step(puzzle.shortest[1]);
-    step(puzzle.start);
-    expect(feedback()).toBe(`Back to ${name(puzzle.start)}.`);
-    expect(routeChips()).toEqual([name(puzzle.start), name(puzzle.end)]);
-    expect(moves()).toBe("2 moves");
+    expect(outlined()).toBe(routeFrontier(graph, puzzle, [puzzle.shortest[1]]).size); // follows the route
+    expect($(`.map-named[data-code="${puzzle.shortest[1]}"]`)).not.toBeNull(); // named: filled
+    clickButton("Reveal All");
+    expect(hints()[1]).toBe("The fog is lifted: every border is drawn.");
+    expect(map().hasAttribute("data-fog")).toBe(false);
+    expect(outlined()).toBe(0);
+    expect(hintButton()!.disabled).toBe(true);
+  });
+
+  it("the fog lifts when the round ends", async () => {
+    clickButton("Start");
+    await loadMap();
+    clickButton("Give Up");
+    expect($(".world-map")!.hasAttribute("data-fog")).toBe(false);
   });
 
   it("completes when the route touches the destination, and reports par", async () => {
@@ -578,19 +658,20 @@ describe("autocomplete", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     clickButton("Pathfinding");
     clickButton("Start");
-    const here = $(".route-prompt strong")!.textContent!;
-    const country = countries.find((c) => c.name === here)!;
-    const neighbours = buildBorderGraph(countries).get(country.code)!;
+    const [start, end] = [...container.querySelectorAll(".route-prompt strong")].map((s) => s.textContent!);
+    const code = (n: string) => countries.find((c) => c.name === n)!.code;
+    const graph = buildBorderGraph(countries);
+    const frontier = new Set([...graph.get(code(start))!, ...graph.get(code(end))!]);
     const offered = new Set<string>();
     for (const letter of "abcdefghijklmnopqrstuvwxyz") {
       setValue(letter);
       for (const name of suggestions()) offered.add(name!);
     }
-    expect(offered.size).toBeGreaterThan(neighbours.size * 10);
-    const far = [...offered].find((name) => !neighbours.has(countries.find((c) => c.name === name)!.code) && name !== here)!;
+    expect(offered.size).toBeGreaterThan(frontier.size * 10);
+    const far = [...offered].find((n) => !frontier.has(code(n)) && n !== start && n !== end)!;
     setValue(far.slice(0, 4));
     act(() => optionNamed(far).click());
-    expect(feedback()).toBe(`${far} doesn't border ${here}.`);
+    expect(feedback()).toBe(`${far} doesn't border your route yet.`);
     vi.restoreAllMocks();
   });
 
@@ -672,13 +753,18 @@ describe("Capitals mode", () => {
     ]);
   });
 
-  it("hints give the initials of missing capitals", () => {
+  it("hints name a country whose capital is missing, then spell out how that capital starts", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     clickButton("Oceania");
-    for (let i = 0; i < 3; i++) act(() => hintButton().click());
-    const initials = [...container.querySelectorAll(".initial")].map((e) => e.textContent);
-    expect(initials).toContain("C."); // Canberra
-    expect(initials).toContain("P. M."); // Port Moresby
-    expect(hints()[2]).toMatch(/^Initials of the 14 capitals still missing:/);
+    // The capital is the answer here, so the first hint can't be "Capital City".
+    expect(hintButton()!.textContent).toBe("Country (0/2)");
+    clickButton("Country");
+    expect(hints()[0]).toMatch(/^One capital left to name is the capital of .+\.$/);
+    const country = inRegion("Oceania").find((c) => hints()[0].includes(`the capital of ${c.name}.`))!;
+    clickButton("First Letter");
+    expect(hints()[1]).toContain(`The capital of ${country.name}: ${letterPattern(country.capitals[0])}`);
+    expect($(".hint-card")!.textContent).not.toContain(country.capitals[0]); // never the answer itself
+    vi.restoreAllMocks();
   });
 
   it("lists missed capitals with their countries after a forfeit, and replays in Capitals mode", () => {
@@ -691,66 +777,115 @@ describe("Capitals mode", () => {
   });
 });
 
-describe("Daily Challenge", () => {
+describe("Daily Challenges", () => {
   /** Remounts the game as if opened at local noon on `date`. */
-  function openOn(date: string) {
+  function openOn(date: string, hour = 12) {
     act(() => root.unmount());
     const [y, m, d] = date.split("-").map(Number);
-    vi.setSystemTime(new Date(y, m - 1, d, 12));
+    vi.setSystemTime(new Date(y, m - 1, d, hour));
     root = createRoot(container);
     act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
   }
-  async function play() {
-    await act(async () => {}); // the card checks the profile for today's result
-    clickButton("Play today's challenge");
+  const card = (kind: "guessing" | "pathfinding") => $(`.daily-card[data-kind="${kind}"]`)!;
+  async function play(kind: "guessing" | "pathfinding") {
+    await act(async () => {}); // the cards check the profile for today's results
+    const button = [...card(kind).querySelectorAll("button")].find((b) => b.textContent === "Play")!;
+    act(() => button.click());
   }
   const graph = buildBorderGraph(countries);
   const nameOf = (code: string) => byCode.get(code)!.name;
-  /** First date from Oct 2026 whose challenge is of the given kind. */
-  function dateWith(kind: "pathfinding" | "continent") {
-    for (let i = 0; ; i++) {
-      const date = dateKey(new Date(2026, 9, 1 + i));
-      if (dailyChallenge(date, graph, CONTINENTS).kind === kind) return date;
-    }
-  }
+  const leads = () => [card("guessing"), card("pathfinding")].map((c) => c.querySelector(".card-lead")!.textContent);
+  const expectedLeads = (date: string) => {
+    const { puzzle } = dailyPathfinding(date, graph)!;
+    const { continent } = dailyGuessing(date, CONTINENTS);
+    return [
+      `Name every country in ${continent === "Americas" ? "the Americas" : continent}.`,
+      `Connect ${nameOf(puzzle.start)} and ${nameOf(puzzle.end)}: the shortest route has ${puzzle.par} countries in between.`,
+    ];
+  };
 
-  it("shows today's challenge on the setup screen", async () => {
+  it("shows both of today's dailies on the setup screen, under today's date", async () => {
     openOn("2026-10-26");
     await act(async () => {});
-    expect($("#daily-heading")!.textContent).toBe("Daily Challenge");
-    expect($(".daily-card__date")!.textContent).toMatch(/October 26/);
+    expect($("#dailies-heading")!.textContent).toBe("Daily Challenges");
+    expect($(".dailies .daily-card__date")!.textContent).toMatch(/October 26/);
+    expect($("#daily-guessing-heading")!.textContent).toBe("Daily Guessing");
+    expect($("#daily-pathfinding-heading")!.textContent).toBe("Daily Pathfinding");
+    expect(leads()).toEqual(expectedLeads("2026-10-26"));
+    expect($(".dailies__note")!.textContent).toContain("New ones unlock at midnight, your time.");
   });
 
-  it("starts the seeded route for that date", async () => {
-    const date = dateWith("pathfinding");
-    const challenge = dailyChallenge(date, graph, CONTINENTS);
-    if (challenge.kind !== "pathfinding") throw new Error("unreachable");
+  it("Daily Pathfinding starts that date's seeded route", async () => {
+    const date = "2026-10-29";
+    const { puzzle } = dailyPathfinding(date, graph)!;
     openOn(date);
-    await play();
-    expect($("h1")!.textContent).toBe(`${nameOf(challenge.puzzle.start)} to ${nameOf(challenge.puzzle.end)}Daily`);
+    await play("pathfinding");
+    expect($("h1")!.textContent).toBe(`${nameOf(puzzle.start)} to ${nameOf(puzzle.end)}Daily`);
     expect($(".daily-badge")!.textContent).toBe("Daily");
   });
 
-  it("starts the seeded continent, in Countries mode even if Capitals is selected", async () => {
-    const date = dateWith("continent");
-    const challenge = dailyChallenge(date, graph, CONTINENTS);
-    if (challenge.kind !== "continent") throw new Error("unreachable");
+  it("Daily Guessing starts that date's seeded continent, in Countries mode even if Capitals is selected", async () => {
+    const date = "2026-10-29";
     openOn(date);
     clickButton("Capitals");
-    await play();
-    expect($("h1")!.textContent).toBe(`${challenge.continent}Daily`);
+    await play("guessing");
+    expect($("h1")!.textContent).toBe(`${dailyGuessing(date, CONTINENTS).continent}Daily`);
     expect(input().placeholder).toBe("Type a country");
   });
 
-  it("shares a spoiler-free daily result", async () => {
-    const date = dateWith("pathfinding");
+  it("shares a spoiler-free Daily Pathfinding result", async () => {
+    const date = "2026-10-29";
     openOn(date);
-    await play();
+    await play("pathfinding");
     wait(72_000);
     clickButton("Give Up");
     const text = $(".share-preview")!.textContent!;
     expect(text.split("\n")).toEqual([`geotag - Daily Pathfinding ${date}`, "🗺️ 🏳️ gave up after 0 moves ⏱️ 01:12"]);
     for (const c of countries) expect(text).not.toContain(c.name);
+  });
+
+  it("shares Daily Guessing under its own title, with the continent on the stats line", async () => {
+    const date = "2026-10-29";
+    const { continent } = dailyGuessing(date, CONTINENTS);
+    openOn(date);
+    await play("guessing");
+    wait(5_000);
+    clickButton("Forfeit");
+    const [heading, stats] = $(".share-preview")!.textContent!.split("\n");
+    expect(heading).toBe(`geotag - Daily Guessing ${date}`);
+    expect(stats).toMatch(new RegExp(`^\\S+ ${continent} 0/\\d+ 🏳️ ⏱️ 00:05$`));
+  });
+
+  it("rolls over to the new day's dailies at local midnight, with the page left open", async () => {
+    openOn("2026-10-26", 23);
+    await act(async () => {});
+    expect(leads()).toEqual(expectedLeads("2026-10-26"));
+    wait(59 * 60 * 1000); // 23:59
+    expect($(".dailies .daily-card__date")!.textContent).toMatch(/October 26/);
+    wait(61 * 1000); // just past midnight
+    await act(async () => {});
+    expect($(".dailies .daily-card__date")!.textContent).toMatch(/October 27/);
+    expect(leads()).toEqual(expectedLeads("2026-10-27"));
+  });
+
+  it("checks the date again when the page comes back into view (timers stall while asleep)", async () => {
+    openOn("2026-10-26", 22);
+    await act(async () => {});
+    vi.setSystemTime(new Date(2026, 9, 27, 7)); // the clock jumps; no timer has fired
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {});
+    expect($(".dailies .daily-card__date")!.textContent).toMatch(/October 27/);
+  });
+
+  it("Play on a screen left open past midnight shows the new dailies instead of starting yesterday's", async () => {
+    openOn("2026-10-26", 22);
+    await act(async () => {});
+    vi.setSystemTime(new Date(2026, 9, 27, 0, 5));
+    await play("pathfinding");
+    expect($("#dailies-heading")).not.toBeNull(); // still on the setup screen
+    expect(leads()).toEqual(expectedLeads("2026-10-27"));
   });
 });
 
@@ -772,7 +907,9 @@ describe("challenge links (?route=)", () => {
   it("skips the setup screen and starts the linked route", () => {
     openLink("route=FRA-CHN");
     expect($("h1")!.textContent).toBe("France to China");
-    expect($(".route-prompt")!.textContent).toBe("You're in France. Name a country that borders it.");
+    expect($(".route-prompt")!.textContent).toBe(
+      "Connect France and China. Name any country that borders either one, or a country you've named.",
+    );
     expect($(".continent-grid")).toBeNull();
     expect(window.location.search).toBe(""); // a reload won't relaunch it
   });
@@ -949,52 +1086,25 @@ describe("map taps", () => {
     });
   const tooltip = () => $(".map-tip")?.textContent ?? null;
   const announced = () => $(".map-stage [aria-live]")!.textContent;
-  const useAllHints = () => {
-    for (let i = 0; i < 3; i++) act(() => hintButton().click());
-  };
 
-  it("is inert during a round until all three hints are used", async () => {
+  it("is inert during a list round, hints or not: taps never give an answer away", async () => {
     clickButton("Oceania");
     await loadMap();
-    act(() => hintButton().click());
-    act(() => hintButton().click());
+    clickButton("Capital City");
+    clickButton("First Letter");
     expect(container.querySelector(".world-map [data-clickable]")).toBeNull();
     tapMap("PNG");
     expect(tooltip()).toBeNull();
     expect($(".map-note")).toBeNull();
   });
 
-  it("after the third hint, a missing country shows only its initials", async () => {
-    clickButton("Oceania");
-    await loadMap();
-    useAllHints();
-    expect($(".map-note")!.textContent).toBe("Tap a missing country to see its initials.");
-    expect(shape("PNG").getAttribute("data-clickable")).toBe("true");
-    tapMap("PNG");
-    expect(tooltip()).toBe("P. N. G.");
-    expect(announced()).toBe("Initials: P. N. G.");
-    expect($(".map-selected")).not.toBeNull();
-  });
-
-  it("shows a named country's full name, and ignores countries outside the round", async () => {
-    clickButton("Oceania");
-    await loadMap();
-    useAllHints();
-    typeKeys("Fiji");
-    tapMap("FJI");
-    expect(tooltip()).toBe("Fiji");
-    expect(shape("IDN").hasAttribute("data-clickable")).toBe(false); // Indonesia is in frame but in Asia
-    tapMap("IDN");
-    expect(tooltip()).toBeNull();
-  });
-
   it("stays up after the tap (no timeout), and closes on Escape, a tap outside, or a tap on the sea", async () => {
     clickButton("Oceania");
     await loadMap();
-    useAllHints();
+    clickButton("Forfeit");
     tapMap("AUS");
     wait(10_000);
-    expect(tooltip()).toBe("A.");
+    expect(tooltip()).toBe("Australia");
     act(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
@@ -1002,7 +1112,7 @@ describe("map taps", () => {
 
     tapMap("AUS");
     act(() => {
-      input().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      $(".result-actions button")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     });
     expect(tooltip()).toBeNull();
 
@@ -1011,17 +1121,6 @@ describe("map taps", () => {
       $(".world-map")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(tooltip()).toBeNull();
-  });
-
-  it("in Capitals mode, shows the initials of the capital", async () => {
-    clickButton("Capitals");
-    clickButton("Oceania");
-    await loadMap();
-    useAllHints();
-    tapMap("AUS");
-    expect(tooltip()).toBe("C."); // Canberra
-    tapMap("PNG");
-    expect(tooltip()).toBe("P. M."); // Port Moresby
   });
 
   it("after the round, any country shows its full name", async () => {
@@ -1211,7 +1310,9 @@ describe("Party Mode (pass-and-play)", () => {
     expect($("h1")!.textContent).toBe(`${title}Player 2`);
     expect(timer()).toBe("00:00");
     expect($(".counter-value")!.textContent).toBe("0");
-    expect($(".route-prompt")!.textContent).toBe(`You're in ${name(puzzle.start)}. Name a country that borders it.`);
+    expect($(".route-prompt")!.textContent).toBe(
+      `Connect ${name(puzzle.start)} and ${name(puzzle.end)}. Name any country that borders either one, or a country you've named.`,
+    );
   });
 
   it("ranks each player's time on the result screen", () => {
@@ -1465,20 +1566,22 @@ describe("sessionReducer", () => {
     expect(sessionReducer(won, { type: "forfeit" })).toBe(won);
   });
 
-  it("pathfinding steps extend the route, cut loops, and finish when the route touches the end", () => {
+  it("pathfinding steps add countries to the board (dead ends too) and finish when the reducer is told so", () => {
     const puzzle = { start: "PRT", end: "POL", par: 3, shortest: ["PRT", "ESP", "FRA", "DEU", "POL"] };
     const g = (code: string): Guess => ({ country: byCode.get(code)!, typed: code, distance: 0 });
     let s = sessionReducer(initialSession, { type: "startRoute", puzzle });
     expect(s).toMatchObject({ mode: "pathfinding", status: "playing", moves: 0, guesses: [] });
     s = sessionReducer(s, { type: "step", guess: g("ESP"), complete: false });
-    s = sessionReducer(s, { type: "step", guess: g("AND"), complete: false });
-    s = sessionReducer(s, { type: "step", guess: g("ESP"), complete: false }); // back out of Andorra
-    expect(s.guesses.map((x) => x.country.code)).toEqual(["ESP"]);
+    s = sessionReducer(s, { type: "step", guess: g("AND"), complete: false }); // a dead end: still a move
+    s = sessionReducer(s, { type: "step", guess: g("DEU"), complete: false }); // from the other end
+    expect(sessionReducer(s, { type: "step", guess: g("ESP"), complete: false })).toBe(s); // already named
+    expect(sessionReducer(s, { type: "step", guess: g("PRT"), complete: false })).toBe(s); // an end
+    expect(s.guesses.map((x) => x.country.code)).toEqual(["ESP", "AND", "DEU"]);
+    expect(s.path).toEqual(["ESP", "AND", "DEU"]);
     expect(s.moves).toBe(3);
-    s = sessionReducer(s, { type: "step", guess: g("FRA"), complete: false });
-    s = sessionReducer(s, { type: "step", guess: g("DEU"), complete: true });
+    s = sessionReducer(s, { type: "step", guess: g("FRA"), complete: true });
     expect(s.status).toBe("won");
-    expect(s.moves).toBe(5);
+    expect(s.moves).toBe(4);
   });
 
   it("counts every committed answer, accepted or not", () => {

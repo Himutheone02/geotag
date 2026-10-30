@@ -1,58 +1,105 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
 import { toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import { initialsOf, pickHintTarget } from "./HintPanel";
+import HintPanel, { letterCount, letterPattern, MAX_HINTS, pickHintTarget, type Hint } from "./HintPanel";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
-const byCode = new Map(countries.map((c) => [c.code, c]));
-const inRegion = (r: string) => countries.filter((c) => c.region === r);
 
-describe("initialsOf", () => {
+describe("letterPattern", () => {
   it.each([
-    ["Kenya", "K."],
-    ["Burkina Faso", "B. F."],
-    ["São Tomé and Príncipe", "S. T. P."],
-    ["Guinea-Bissau", "G. B."],
-    ["Saint Vincent and the Grenadines", "S. V. G."],
-    ["DR Congo", "D. C."],
-  ])("%s -> %s", (name, initials) => {
-    expect(initialsOf(name)).toBe(initials);
+    ["Brazil", "B _ _ _ _ _"],
+    ["Chad", "C _ _ _"],
+    ["Burkina Faso", "B _ _ _ _ _ _   _ _ _ _"],
+    ["Guinea-Bissau", "G _ _ _ _ _ - _ _ _ _ _ _"],
+    ["São Tomé and Príncipe", "S _ _   _ _ _ _   _ _ _   _ _ _ _ _ _ _ _"],
+    ["Côte d'Ivoire", "C _ _ _   _ ' _ _ _ _ _ _"],
+    ["  Kenya ", "K _ _ _ _"],
+  ])("%s -> %s", (name, pattern) => {
+    expect(letterPattern(name)).toBe(pattern);
+  });
+
+  it("only gives away the first letter, upper-cased", () => {
+    expect(letterPattern("ottawa")).toBe("O _ _ _ _ _");
+  });
+});
+
+describe("letterCount", () => {
+  it("counts letters only", () => {
+    expect(letterCount("Brazil")).toBe(6);
+    expect(letterCount("Guinea-Bissau")).toBe(12);
+    expect(letterCount("São Tomé and Príncipe")).toBe(18);
   });
 });
 
 describe("pickHintTarget", () => {
-  const first = () => 0;
+  const africa = countries.filter((c) => c.region === "Africa");
 
-  it("stage 1 picks a country with land borders that gives away the fewest other answers", () => {
-    const africa = inRegion("Africa");
-    const scope = new Set(africa.map((c) => c.code));
-    const target = pickHintTarget(africa, { scope, named: new Set(), needsBorders: true, random: first })!;
-    expect(target.borders.length).toBeGreaterThan(0);
-    const leaks = (code: string) => byCode.get(code)!.borders.filter((b) => scope.has(b)).length;
-    const minimum = Math.min(...africa.filter((c) => c.borders.length).map((c) => leaks(c.code)));
-    expect(leaks(target.code)).toBe(minimum);
-  });
-
-  it("already-named neighbours don't count as giveaways", () => {
-    const europe = inRegion("Europe");
-    const scope = new Set(europe.map((c) => c.code));
-    // With all of Germany's neighbours named, Germany leaks nothing and wins.
-    const named = new Set(byCode.get("DEU")!.borders);
-    const missing = europe.filter((c) => !named.has(c.code));
-    const target = pickHintTarget(missing, { scope, named, needsBorders: true, random: first })!;
-    expect(target.borders.filter((b) => scope.has(b) && !named.has(b))).toEqual([]);
-  });
-
-  it("in Oceania, stage 1 uses the only bordered country, then falls back to islands", () => {
-    const oceania = inRegion("Oceania");
-    const scope = new Set(oceania.map((c) => c.code));
-    expect(pickHintTarget(oceania, { scope, named: new Set(), needsBorders: true })!.code).toBe("PNG");
-    const islands = oceania.filter((c) => c.code !== "PNG");
-    const fallback = pickHintTarget(islands, { scope, named: new Set(["PNG"]), needsBorders: true })!;
-    expect(fallback.borders).toEqual([]);
+  it("picks a missing country at random", () => {
+    expect(pickHintTarget(africa, () => 0)).toBe(africa[0]);
+    expect(pickHintTarget(africa, () => 0.9999)).toBe(africa[africa.length - 1]);
+    expect(pickHintTarget(africa, () => 0.5)).toBe(africa[Math.floor(africa.length / 2)]);
   });
 
   it("returns null when nothing is missing", () => {
-    expect(pickHintTarget([], { scope: new Set(), named: new Set(), needsBorders: false })).toBeNull();
+    expect(pickHintTarget([])).toBeNull();
+  });
+});
+
+describe("HintPanel", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const hints: Hint[] = [
+    { name: "Capital City", shown: "One missing country has the capital Nairobi." },
+    { name: "First Letter", shown: "K _ _ _ _" },
+  ];
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const render = (used: number, onRequest = vi.fn(), available = true) =>
+    act(() => root.render(<HintPanel used={used} hints={hints} lead="Two hints per round." available={available} onRequest={onRequest} />));
+  const button = () => container.querySelector("button")!;
+
+  it("has two hints per round", () => {
+    expect(MAX_HINTS).toBe(2);
+  });
+
+  it("names the next hint on its button, and shows the lead before any hint", () => {
+    const onRequest = vi.fn();
+    render(0, onRequest);
+    expect(button().textContent).toBe("Capital City (0/2)");
+    expect(container.querySelector(".card-lead")!.textContent).toBe("Two hints per round.");
+    act(() => button().click());
+    expect(onRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists the hints given so far, in order", () => {
+    render(1);
+    expect(button().textContent).toBe("First Letter (1/2)");
+    expect([...container.querySelectorAll(".hint-name")].map((n) => n.textContent)).toEqual(["Capital City"]);
+    render(2);
+    expect(button().textContent).toBe("No hints left (2/2)");
+    expect(button().disabled).toBe(true);
+    expect([...container.querySelectorAll(".hint-text")].map((n) => n.textContent)).toEqual([
+      "One missing country has the capital Nairobi.",
+      "K _ _ _ _",
+    ]);
+  });
+
+  it("is disabled when there's nothing to hint at", () => {
+    render(0, vi.fn(), false);
+    expect(button().disabled).toBe(true);
   });
 });

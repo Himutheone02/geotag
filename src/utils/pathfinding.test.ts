@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 import snapshot from "@/data/countries.json";
 import { toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import {
-  applyStep,
   areNeighbors,
   bfsDistances,
   buildBorderGraph,
-  currentCountry,
+  detourOf,
   MAX_PAR,
   MIN_PAR,
   parseRouteParam,
   pickRoute,
-  reachesEnd,
+  routeComplete,
+  routeFrontier,
   routeParam,
   shortestPath,
   type RoutePuzzle,
@@ -108,25 +108,40 @@ describe("pickRoute", () => {
   });
 });
 
-describe("playing a route", () => {
+describe("playing a route (free roam, from both ends)", () => {
   const puzzle: RoutePuzzle = { start: "PRT", end: "POL", par: 3, shortest: ["PRT", "ESP", "FRA", "DEU", "POL"] };
+  const sorted = (set: Set<string>) => [...set].sort();
 
-  it("tracks the current country", () => {
-    expect(currentCountry(puzzle, [])).toBe("PRT");
-    expect(currentCountry(puzzle, ["ESP", "FRA"])).toBe("FRA");
+  it("accepts any country bordering either end at first", () => {
+    // Portugal borders only Spain; Poland borders seven countries.
+    expect(sorted(routeFrontier(graph, puzzle, []))).toEqual(["BLR", "CZE", "DEU", "ESP", "LTU", "RUS", "SVK", "UKR"]);
   });
 
-  it("extends the route, and cuts loops off when stepping back", () => {
-    expect(applyStep(puzzle, [], "ESP")).toEqual(["ESP"]);
-    expect(applyStep(puzzle, ["ESP", "AND"], "ESP")).toEqual(["ESP"]); // back out of Andorra
-    expect(applyStep(puzzle, ["ESP", "FRA", "BEL"], "FRA")).toEqual(["ESP", "FRA"]);
-    expect(applyStep(puzzle, ["ESP"], "PRT")).toEqual([]); // back to the start
+  it("then anything bordering a country already guessed, from either end, but nothing on the board", () => {
+    const frontier = routeFrontier(graph, puzzle, ["ESP", "DEU"]);
+    for (const code of ["FRA", "AND", "AUT", "DNK", "NLD", "CZE"]) expect(frontier.has(code)).toBe(true);
+    for (const code of ["PRT", "POL", "ESP", "DEU", "ITA"]) expect(frontier.has(code)).toBe(false); // Italy borders neither yet
   });
 
-  it("is complete once the route touches the end", () => {
-    expect(reachesEnd(graph, puzzle, "FRA")).toBe(false);
-    expect(reachesEnd(graph, puzzle, "DEU")).toBe(true); // Germany borders Poland
-    expect(reachesEnd(graph, puzzle, "POL")).toBe(true);
+  it("lets dead ends stay on the board: they just add more frontier", () => {
+    const frontier = routeFrontier(graph, puzzle, ["ESP", "AND"]); // Andorra leads nowhere new
+    expect(frontier.has("FRA")).toBe(true);
+    expect(routeComplete(graph, puzzle, ["ESP", "AND"])).toBe(false);
+  });
+
+  it("is complete once the guesses link the two ends, built from either side or both", () => {
+    expect(routeComplete(graph, puzzle, [])).toBe(false);
+    expect(routeComplete(graph, puzzle, ["ESP", "FRA"])).toBe(false);
+    expect(routeComplete(graph, puzzle, ["ESP", "FRA", "DEU"])).toBe(true); // from the start
+    expect(routeComplete(graph, puzzle, ["DEU", "FRA", "ESP"])).toBe(true); // from the destination
+    expect(routeComplete(graph, puzzle, ["ESP", "DEU", "AND", "FRA"])).toBe(true); // both ends, with a dead end
+    expect(routeComplete(graph, puzzle, ["ESP", "DEU", "CZE"])).toBe(false); // two chains, not yet joined
+  });
+
+  it("measures how far out of the way a country is", () => {
+    expect(detourOf(graph, puzzle, "FRA")).toBe(0); // on the shortest route
+    expect(detourOf(graph, puzzle, "AND")).toBeGreaterThan(0);
+    expect(detourOf(graph, puzzle, "RUS")).toBeGreaterThan(detourOf(graph, puzzle, "CZE"));
   });
 });
 

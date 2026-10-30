@@ -2,8 +2,8 @@
 
 import { useSearchParams } from "next/navigation";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
-import DailyCard from "@/components/game/DailyCard";
-import HintPanel, { initialsOf, MAX_HINTS, pickHintTarget } from "@/components/game/HintPanel";
+import DailyCard, { longDate } from "@/components/game/DailyCard";
+import HintPanel, { letterCount, letterPattern, MAX_HINTS, pickHintTarget, type Hint } from "@/components/game/HintPanel";
 import MapTooltip from "@/components/game/MapTooltip";
 import ProfileDialog from "@/components/game/ProfileDialog";
 import ShareResult from "@/components/game/ShareResult";
@@ -13,10 +13,21 @@ import ClayCard from "@/components/ui/ClayCard";
 import ClayInput, { type ClayInputOption } from "@/components/ui/ClayInput";
 import type { EmpireKey, EmpireRound } from "@/data/loadCountries";
 import SplashScreen, { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
-import { getSetting, initDb, listPartyResults, savePartyResult, saveRound, setSetting, type PartyResult, type RoundRecord } from "@/utils/db";
+import {
+  dailyId,
+  getSetting,
+  initDb,
+  listPartyResults,
+  saveDaily,
+  savePartyResult,
+  saveRound,
+  setSetting,
+  type PartyResult,
+  type RoundRecord,
+} from "@/utils/db";
 import PartyBoard from "@/components/game/PartyBoard";
 import { downloadBlob, renderScoreCard, scoreCardFileName } from "@/utils/scoreCard";
-import { dailyChallenge, dateKey } from "@/utils/dailySeed";
+import { dailyGuessing, dailyPathfinding, dateKey, nextLocalMidnight, type DailyKind } from "@/utils/dailySeed";
 import {
   answerForInput,
   answerLabel,
@@ -29,14 +40,13 @@ import {
   type Country,
 } from "@/utils/fuzzyMatch";
 import {
-  applyStep,
   buildBorderGraph,
-  currentCountry,
   MAX_PAR,
   MIN_PAR,
   parseRouteParam,
   pickRoute,
-  reachesEnd,
+  routeComplete,
+  routeFrontier,
   routeParam,
   type RoutePuzzle,
 } from "@/utils/pathfinding";
@@ -104,7 +114,6 @@ const CONTINENT_EMOJI: Record<Continent, string> = {
   Oceania: "🌏",
 };
 
-const NOTHING_NAMED: ReadonlySet<string> = new Set();
 const NO_OPTIONS: ClayInputOption[] = [];
 /** IndexedDB settings keys: the autocomplete toggle, and Countries/Capitals on the setup screen. */
 const SUGGESTIONS_SETTING = "suggestions";
@@ -259,16 +268,12 @@ export function sessionReducer(state: Session, action: SessionAction): Session {
     case "step": {
       if (state.status !== "playing" || !state.route) return state;
       const code = action.guess.country.code;
-      const codes = applyStep(
-        state.route,
-        state.guesses.map((g) => g.country.code),
-        code,
-      );
-      const guesses = codes.map((c) => state.guesses.find((g) => g.country.code === c) ?? action.guess);
+      const { start, end } = state.route;
+      if (code === start || code === end || state.guesses.some((g) => g.country.code === code)) return state;
       return {
         ...state,
-        guesses,
-        moves: state.moves + (code === state.route.end ? 0 : 1),
+        guesses: [...state.guesses, action.guess],
+        moves: state.moves + 1,
         path: [...state.path, code],
         attempts: state.attempts + 1,
         status: action.complete ? "won" : "playing",
@@ -484,15 +489,25 @@ export default function CountryGuesser({
   const targetSet = useMemo(() => new Set(session.targetCodes), [session.targetCodes]);
   const namedSet = useMemo(() => new Set(guesses.map((g) => g.country.code)), [guesses]);
 
-  // Pathfinding: valid answers are the countries bordering where the player stands.
+  // Pathfinding (free roam, from both ends): valid answers are the countries bordering the
+  // board (the start, the destination, and every country guessed so far), not on it yet.
   const route = session.route;
   const isRoute = session.mode === "pathfinding" && route !== null;
-  const here = route ? currentCountry(route, guesses.map((g) => g.country.code)) : null;
-  const hereName = here ? index.byCode.get(here)!.name : "";
-  const routeScope = useMemo(() => (here ? (graph.get(here) ?? new Set<string>()) : new Set<string>()), [graph, here]);
-  // What the shared matcher should accept right now. Route steps may revisit countries, so nothing counts as "named".
-  const scope = isRoute ? routeScope : targetSet;
-  const alreadyNamed = isRoute ? NOTHING_NAMED : namedSet;
+  const guessedCodes = useMemo(() => guesses.map((g) => g.country.code), [guesses]);
+  const routeScope = useMemo(
+    () => (route ? routeFrontier(graph, route, guessedCodes) : new Set<string>()),
+    [graph, route, guessedCodes],
+  );
+  // The board: on a route, the two ends count as "already named" too.
+  const routeBoard = useMemo(
+    () => (route ? new Set([route.start, route.end, ...guessedCodes]) : namedSet),
+    [route, guessedCodes, namedSet],
+  );
+  // What the shared matcher should recognize right now. On a route that's the frontier plus
+  // the board itself, so naming an end or a country already named is explained, not rejected.
+  const routeMatchScope = useMemo(() => new Set([...routeScope, ...routeBoard]), [routeScope, routeBoard]);
+  const scope = isRoute ? routeMatchScope : targetSet;
+  const alreadyNamed = isRoute ? routeBoard : namedSet;
   const nameOf = (code: string) => index.byCode.get(code)!.name;
   const missing = useMemo(
     () =>
@@ -534,7 +549,30 @@ export default function CountryGuesser({
     void setSetting(ANSWER_SETTING, answer);
   }
 
-  const daily = useMemo(() => (today ? dailyChallenge(today, graph, CONTINENTS) : null), [today, graph]);
+  // Today's two dailies, each from its own seed.
+  const dailies = useMemo(
+    () => (today ? { guessing: dailyGuessing(today, CONTINENTS), pathfinding: dailyPathfinding(today, graph) } : null),
+    [today, graph],
+  );
+
+  // Both dailies unlock at local midnight: roll the setup screen over to the new date then,
+  // even if the page has been open all along. Timers stall while a device sleeps or a tab
+  // is in the background, so coming back to the page checks the date again too.
+  useEffect(() => {
+    if (!today) return;
+    const recheck = () => setToday(dateKey()); // same date: no re-render
+    const timer = setTimeout(recheck, Math.max(0, nextLocalMidnight() - Date.now()) + 250);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recheck();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", recheck);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", recheck);
+    };
+  }, [today]);
 
   function toggleHaptics() {
     const next = !hapticsOn;
@@ -578,7 +616,7 @@ export default function CountryGuesser({
     if (!isPlaying || !country) return;
     if (alreadyNamed.has(country.code)) {
       dispatch({ type: "miss" });
-      say("warn", `${option.label} is already on your list.`);
+      say("warn", alreadyMessage(option.label, country.code));
     } else if (!scope.has(country.code)) {
       dispatch({ type: "miss" });
       say("warn", outOfScopeMessage(country, option.label));
@@ -595,17 +633,19 @@ export default function CountryGuesser({
 
   function requestHint() {
     if (!isPlaying || session.hintsUsed >= MAX_HINTS) return;
-    const stage = session.hintsUsed + 1;
+    // Pathfinding hints are about the map, not a country: no target.
     let target: string | null = null;
-    if (stage === 1) {
-      target = pickHintTarget(missing, { scope: targetSet, named: namedSet, needsBorders: true })?.code ?? null;
-    } else if (stage === 2) {
-      // Outline the stage-1 country, unless the player has already found it.
-      const previous = session.hintTargets[0];
-      target =
-        previous && !namedSet.has(previous)
-          ? previous
-          : (pickHintTarget(missing, { scope: targetSet, named: namedSet, needsBorders: false })?.code ?? null);
+    if (!isRoute) {
+      if (session.hintsUsed === 0) {
+        // Capital City: a missing country that has a capital (in Capitals rounds every one does).
+        const withCapital = missing.filter((c) => c.capitals.length > 0);
+        target = pickHintTarget(withCapital.length > 0 ? withCapital : missing)?.code ?? null;
+      } else {
+        // First Letter: the same country as the first hint while it's still missing, so the
+        // two hints build on each other; otherwise another missing country, at random.
+        const previous = session.hintTargets[0];
+        target = previous && !namedSet.has(previous) ? previous : (pickHintTarget(missing)?.code ?? null);
+      }
     }
     dispatch({ type: "hint", target });
     inputRef.current?.focus();
@@ -658,14 +698,24 @@ export default function CountryGuesser({
     startRoute(result.puzzle, null, true);
   }
 
-  /** Today's seeded puzzle. A replay plays the same puzzle as an ordinary round, so only the first try is the daily result. */
-  function startDaily(replay: boolean) {
+  /**
+   * Starts one of today's dailies. A replay plays the same puzzle as an ordinary round, so
+   * only the first try is the daily result.
+   */
+  function startDaily(kind: DailyKind, replay: boolean) {
     const date = dateKey(); // re-read: the setup screen may have been open since yesterday
-    setToday(date);
-    const challenge = dailyChallenge(date, graph, CONTINENTS);
+    if (date !== today) {
+      // Midnight has passed: show the new day's dailies rather than start yesterday's.
+      setToday(date);
+      return;
+    }
     const dailyDate = replay ? null : date;
-    if (challenge.kind === "pathfinding") startRoute(challenge.puzzle, dailyDate);
-    else start(challenge.continent, "countries", dailyDate);
+    if (kind === "pathfinding") {
+      const challenge = dailyPathfinding(date, graph);
+      if (challenge) startRoute(challenge.puzzle, dailyDate);
+    } else {
+      start(dailyGuessing(date, CONTINENTS).continent, "countries", dailyDate);
+    }
   }
 
   /* ---------------- Party Mode (pass-and-play) ---------------- */
@@ -724,19 +774,17 @@ export default function CountryGuesser({
       distance === 0
         ? `Recognized: ${what}`
         : `Recognized: ${what} (from "${typed}", ${distance} edit${distance === 1 ? "" : "s"} away)`;
-    // Hinted: the initials of every missing answer are showing, or a hint was about this country.
+    // Hinted: a hint was about this country, or (Pathfinding) its borders were drawn by a hint.
     const [stage1, stage2] = session.hintTargets;
-    const hinted =
-      session.hintsUsed >= 3 ||
-      (session.hintsUsed >= 1 && stage1 === country.code) ||
-      (session.hintsUsed >= 2 && stage2 === country.code);
+    const hinted = isRoute
+      ? session.hintsUsed >= 2 || (session.hintsUsed >= 1 && routeScope.has(country.code))
+      : (session.hintsUsed >= 1 && stage1 === country.code) || (session.hintsUsed >= 2 && stage2 === country.code);
     const guess: Guess = { country, typed, distance, label, at: Date.now() - startedAt.current, hinted, picked };
     if (isRoute && route) {
-      const stepsBack = country.code === route.start || namedSet.has(country.code);
-      const complete = reachesEnd(graph, route, country.code);
+      const complete = routeComplete(graph, route, [...guessedCodes, country.code]);
       dispatch({ type: "step", guess, complete });
       if (complete) buzz(); // route finished
-      say("ok", stepsBack ? `Back to ${country.name}.` : recognized);
+      say("ok", recognized);
     } else {
       dispatch({ type: "guess", guess });
       say("ok", recognized);
@@ -746,11 +794,19 @@ export default function CountryGuesser({
     inputRef.current?.focus();
   }
 
+  /** An answer that's already in: on a route, the start, the destination or a country guessed already. */
+  function alreadyMessage(label: string, code: string): string {
+    if (isRoute && route) {
+      if (code === route.start) return `${label} is where you start.`;
+      if (code === route.end) return `${label} is your destination: connect to it.`;
+      return `${label} is already on your route.`;
+    }
+    return `${label} is already on your list.`;
+  }
+
   /** Why a recognized answer doesn't count right now. `label`: what the player gave (a capital in Capitals mode). */
   function outOfScopeMessage(country: Country, label = country.name): string {
-    if (isRoute) {
-      return country.code === here ? `You're already in ${country.name}.` : `${country.name} doesn't border ${hereName}.`;
-    }
+    if (isRoute) return `${country.name} doesn't border your route yet.`;
     const why = current?.outOfScope?.(country.name) ?? `${country.name} isn't part of this round.`;
     return isCapitals ? `${label} is the capital of ${country.name}. ${why}` : why;
   }
@@ -790,7 +846,7 @@ export default function CountryGuesser({
             : "Press Enter to check it, or keep typing.",
         );
       } else if (decision.action === "alreadyNamed") {
-        say("warn", `${answerForInput(index, decision.country.code, value)} is already on your list.`);
+        say("warn", alreadyMessage(answerForInput(index, decision.country.code, value), decision.country.code));
       } else {
         // A complete, exact name that doesn't count here: say so without waiting for Enter.
         const result = matchCountry(value, index, { scope });
@@ -817,7 +873,7 @@ export default function CountryGuesser({
       case "match":
         if (alreadyNamed.has(result.country.code)) {
           dispatch({ type: "miss" });
-          say("warn", `${answerForInput(index, result.country.code, typed)} is already on your list.`);
+          say("warn", alreadyMessage(answerForInput(index, result.country.code, typed), result.country.code));
         } else accept(result.country, typed, result.distance);
         break;
       case "ambiguous":
@@ -884,6 +940,7 @@ export default function CountryGuesser({
         title: session.challenge ? "Pathfinding Challenge" : "Pathfinding",
         moves: session.moves,
         par: session.route.par,
+        hints: session.hintsUsed,
         grid: routeGrid(graph, session.route, session.path),
       });
     }
@@ -891,7 +948,9 @@ export default function CountryGuesser({
     return buildShareText({
       ...common,
       kind: "list",
-      title: isCapitals ? `${current.title} Capitals` : current.title,
+      // Daily Guessing: "Daily Guessing 2026-10-29", with the continent on the stats line.
+      title: session.daily ? "Guessing" : isCapitals ? `${current.title} Capitals` : current.title,
+      subject: session.daily ? current.title : undefined,
       emoji: isCapitals ? "🏙️" : current.emoji,
       named: session.guesses.length,
       total: session.targetCodes.length,
@@ -961,7 +1020,28 @@ export default function CountryGuesser({
         })),
       };
     }
-    if (record) void saveRound(record);
+    if (!record) return;
+    void saveRound(record);
+    // The day's first attempt at a daily also goes to that daily's own records.
+    if (session.daily) {
+      const kind: DailyKind = session.mode === "pathfinding" ? "pathfinding" : "guessing";
+      void saveDaily({
+        id: dailyId(kind, session.daily),
+        kind,
+        date: session.daily,
+        result: record.result,
+        timeMs: elapsedMs,
+        startedAt: record.finishedAt - elapsedMs,
+        finishedAt: record.finishedAt,
+        label: record.label,
+        correct: record.correct,
+        target: record.target,
+        moves: record.moves,
+        par: record.par,
+        hintsUsed: record.hintsUsed,
+        share: record.share,
+      });
+    }
   }, [isOver, session, countryIndex, rounds, shareText, party]);
 
   const total = session.targetCodes.length;
@@ -969,13 +1049,67 @@ export default function CountryGuesser({
   const finalTime = session.elapsedMs === null ? "…" : formatElapsed(session.elapsedMs);
   const hintsPhrase =
     session.hintsUsed === 0 ? "no hints" : session.hintsUsed === 1 ? "1 hint" : `${session.hintsUsed} hints`;
-  const [stage1Code, stage2Code] = session.hintTargets;
-  const borderTarget = stage1Code ? (index.byCode.get(stage1Code) ?? null) : null;
-  const borderNeighbors = borderTarget
-    ? borderTarget.borders.flatMap((code) => index.byCode.get(code) ?? []).sort((a, b) => a.name.localeCompare(b.name))
-    : [];
-  const outlineTarget = stage2Code ? (index.byCode.get(stage2Code) ?? null) : null;
-  const highlight = isPlaying && session.hintsUsed >= 2 ? stage2Code : null;
+  const hints = useMemo<Hint[]>(() => {
+    if (isRoute) {
+      return [
+        { name: "Reveal Adjacent", shown: "Every country that borders your route is outlined on the map. The outlines follow your route as it grows." },
+        { name: "Reveal All", shown: "The fog is lifted: every border is drawn." },
+      ];
+    }
+    const [firstCode, secondCode] = session.hintTargets;
+    const first = firstCode ? index.byCode.get(firstCode) : undefined;
+    const second = secondCode ? index.byCode.get(secondCode) : undefined;
+    const found = (c: Country) =>
+      namedSet.has(c.code) ? <span className="hint-found"> Found{isCapitals ? `: ${answerLabel(capitalIndex, c.code)}` : `: ${c.name}`}.</span> : null;
+    const capitalHint: Hint = isCapitals
+      ? {
+          // In Capitals rounds the capital is the answer: this hint names the country instead.
+          name: "Country",
+          shown: first ? (
+            <>
+              One capital left to name is the capital of <strong>{first.name}</strong>.{found(first)}
+            </>
+          ) : (
+            "Nothing left to hint at."
+          ),
+        }
+      : {
+          name: "Capital City",
+          shown: first ? (
+            <>
+              One missing country has the capital{first.capitals.length > 1 ? "s" : ""}{" "}
+              <strong>{first.capitals.length > 0 ? first.capitals.join(", ") : "(none on record)"}</strong>.{found(first)}
+            </>
+          ) : (
+            "Nothing left to hint at."
+          ),
+        };
+    const word = second ? (isCapitals ? answerLabel(capitalIndex, second.code) : second.name) : "";
+    const letterHint: Hint = {
+      name: "First Letter",
+      shown: second ? (
+        <>
+          {second.code === firstCode
+            ? isCapitals
+              ? `The capital of ${second.name}: `
+              : "That country: "
+            : isCapitals
+              ? "A capital you're missing: "
+              : "A missing country: "}
+          <span className="letter-pattern" aria-hidden="true">
+            {letterPattern(word)}
+          </span>
+          <span className="visually-hidden">
+            starts with {word.trim()[0]?.toUpperCase()}, {letterCount(word)} letters
+          </span>
+          {found(second)}
+        </>
+      ) : (
+        "Nothing left to hint at."
+      ),
+    };
+    return [capitalHint, letterHint];
+  }, [isRoute, isCapitals, session.hintTargets, index, namedSet, capitalIndex]);
   // Chips take the round's color; in World Mode each takes its own continent's.
   const chipRegion = (c: Country) => (current?.theme ? undefined : c.region);
 
@@ -993,6 +1127,10 @@ export default function CountryGuesser({
         : null,
     [route, status, namedSet, hideSolution],
   );
+  // Fog of war (Pathfinding): borders stay hidden until named, or until a hint draws them.
+  // Reveal Adjacent outlines the live frontier; Reveal All lifts the fog. It lifts anyway when the round ends.
+  const fog = isRoute && isPlaying && session.hintsUsed < 2;
+  const revealed = fog && session.hintsUsed >= 1 ? routeScope : null;
   const routeEndpoints = useMemo(
     () =>
       route
@@ -1022,11 +1160,8 @@ export default function CountryGuesser({
   useEffect(() => {
     tapContext.current = { round: session.round, status };
   });
-  const mapClickable = useMemo<ReadonlySet<string> | null>(() => {
-    if (isOver) return playable;
-    if (isPlaying && !isRoute && session.hintsUsed >= MAX_HINTS) return targetSet;
-    return null; // fewer than 3 hints: no peeking
-  }, [isOver, isPlaying, isRoute, session.hintsUsed, playable, targetSet]);
+  // Taps name countries only once the round is over: during a round the map gives nothing away.
+  const mapClickable = isOver ? playable : null;
   const onMapClick = useCallback((code: string | null, at: { clientX: number; clientY: number }) => {
     const stage = mapStageRef.current;
     if (!code || !stage) {
@@ -1049,27 +1184,11 @@ export default function CountryGuesser({
     const c = countryIndex.byCode.get(code);
     if (!c || !mapClickable?.has(code)) return null;
     const capitals = `${c.capitals.length > 1 ? "Capitals" : "Capital"}: ${c.capitals.join(", ")}`;
-    if (isOver) {
-      return isCapitals ? { title: c.name, detail: capitals, announce: `${c.name}. ${capitals}.` } : { title: c.name, announce: c.name };
-    }
-    const named = guesses.find((g) => g.country.code === code);
-    if (named) {
-      return isCapitals
-        ? { title: named.label ?? c.capitals[0], detail: c.name, announce: `${named.label ?? c.capitals[0]}, ${c.name}` }
-        : { title: c.name, announce: c.name };
-    }
-    const initials = initialsOf(isCapitals ? (c.capitals[0] ?? c.name) : c.name);
-    return { title: initials, announce: `Initials: ${initials}` };
+    return isCapitals ? { title: c.name, detail: capitals, announce: `${c.name}. ${capitals}.` } : { title: c.name, announce: c.name };
   }
   const tipOpen = mapTap !== null && mapTap.round === session.round && mapTap.status === status;
   const tip = tipOpen ? mapTipFor(mapTap.code) : null;
-  const mapNote = !mapClickable
-    ? null
-    : isOver
-      ? `Tap any country to see its name${isCapitals ? " and capital" : ""}.`
-      : isCapitals
-        ? "Tap a country of this round to see its capital's initials."
-        : "Tap a missing country to see its initials.";
+  const mapNote = mapClickable ? `Tap any country to see its name${isCapitals ? " and capital" : ""}.` : null;
 
   // The tooltip stays up after the finger lifts; it closes on the next tap elsewhere, or Escape.
   const tipShown = tip !== null;
@@ -1299,7 +1418,26 @@ export default function CountryGuesser({
         </ClayCard>
       )}
 
-      {status === "setup" && daily && <DailyCard challenge={daily} onPlay={startDaily} />}
+      {status === "setup" && dailies && today && (
+        <section className="dailies setup-only" aria-labelledby="dailies-heading">
+          <div className="dailies__head">
+            <p className="daily-card__date">{longDate(today)}</p>
+            <h2 id="dailies-heading" className="dailies__title">
+              Daily Challenges
+            </h2>
+            <p className="dailies__note">The same two puzzles for everyone today. New ones unlock at midnight, your time.</p>
+          </div>
+          <DailyCard key={`guessing:${today}`} challenge={dailies.guessing} nameOf={nameOf} onPlay={(replay) => startDaily("guessing", replay)} />
+          {dailies.pathfinding && (
+            <DailyCard
+              key={`pathfinding:${today}`}
+              challenge={dailies.pathfinding}
+              nameOf={nameOf}
+              onPlay={(replay) => startDaily("pathfinding", replay)}
+            />
+          )}
+        </section>
+      )}
 
       {status === "setup" && (
         <ClayCard as="section" className="setup-only" aria-labelledby="setup-heading">
@@ -1381,8 +1519,9 @@ export default function CountryGuesser({
                 Find a land route
               </h2>
               <p className="card-lead">
-                You get a start and a destination. Get there by naming countries that share a land border, each one
-                bordering the last. The timer starts when you press Start.
+                You get a start and a destination. Connect them by naming countries: each guess must border the start,
+                the destination, or a country you&apos;ve already named, so you can build from both ends. Every guess
+                is a move, dead ends too. The timer starts when you press Start.
               </p>
               <div className="continent-grid">
                 <ClayButton className="continent-button" onClick={() => startRoute()}>
@@ -1422,7 +1561,8 @@ export default function CountryGuesser({
         <ClayCard as="section" aria-label="Your answer">
           {isRoute && (
             <p className="route-prompt">
-              You&apos;re in <strong>{hereName}</strong>. Name a country that borders it.
+              Connect <strong>{nameOf(route!.start)}</strong> and <strong>{nameOf(route!.end)}</strong>. Name any country that
+              borders either one, or a country you&apos;ve named.
             </p>
           )}
           <form onSubmit={onSubmit} className="entry">
@@ -1482,15 +1622,18 @@ export default function CountryGuesser({
         </ClayCard>
       )}
 
-      {isPlaying && !isRoute && (
+      {isPlaying && (
         <HintPanel
           used={session.hintsUsed}
-          borderTarget={borderTarget}
-          borderNeighbors={borderNeighbors}
-          outlineTarget={outlineTarget}
-          named={namedSet}
-          missing={missing}
-          capitals={isCapitals}
+          hints={hints}
+          lead={
+            isRoute
+              ? "The map starts in fog: only your start, your destination and the coastlines show. Reveal Adjacent outlines the countries next to your route; Reveal All lifts the fog."
+              : isCapitals
+                ? "Capital City names a country whose capital you're missing; First Letter spells out how its capital starts."
+                : "Capital City gives you the capital of a country you're missing; First Letter spells out how its name starts."
+          }
+          available={isRoute || missing.length > 0}
           onRequest={requestHint}
         />
       )}
@@ -1654,8 +1797,9 @@ export default function CountryGuesser({
                 regions={regions}
                 targets={allCodes}
                 named={namedSet}
-                highlight={null}
                 endpoints={routeEndpoints}
+                fog={fog}
+                revealed={revealed}
                 description={`Map of the route from ${nameOf(route.start)} to ${nameOf(route.end)}: ${guesses.length} ${guesses.length === 1 ? "country" : "countries"} on the route so far.${routeMissed ? ` In red, the ${routeMissed.size} ${routeMissed.size === 1 ? "country" : "countries"} of one shortest route you didn't reach.` : ""}`}
                 clickable={mapClickable}
                 onCountryClick={onMapClick}
@@ -1694,7 +1838,6 @@ export default function CountryGuesser({
                 regions={regions}
                 targets={session.targetCodes}
                 named={namedSet}
-                highlight={highlight}
                 clickable={mapClickable}
                 onCountryClick={onMapClick}
                 selected={tip ? mapTap?.code : null}

@@ -113,30 +113,54 @@ export function pickRoute(
 }
 
 /* ------------------------------------------------------------------ */
-/* Playing a route                                                     */
+/* Playing a route (free roam, from both ends)                          */
 /* ------------------------------------------------------------------ */
 
-/** The country the player is standing in: the last one on their route, or the start. */
-export function currentCountry(puzzle: RoutePuzzle, route: readonly string[]): string {
-  return route.length ? route[route.length - 1] : puzzle.start;
+/*
+ * The board is the start, the destination, and every country guessed so far. A guess
+ * counts if it borders anything on the board: so the route can grow from either end,
+ * and a guess can lead nowhere (a dead end) and still count as a move. Every guessed
+ * country is therefore joined, by land, to the start or to the destination. The route
+ * is complete once the board links the two.
+ */
+
+function boardOf(puzzle: RoutePuzzle, guessed: Iterable<string>): Set<string> {
+  return new Set([puzzle.start, puzzle.end, ...guessed]);
+}
+
+/** The countries a guess may name now: every country bordering the board, not on it yet. */
+export function routeFrontier(graph: BorderGraph, puzzle: RoutePuzzle, guessed: readonly string[]): Set<string> {
+  const board = boardOf(puzzle, guessed);
+  const frontier = new Set<string>();
+  for (const code of board) for (const next of graph.get(code) ?? []) if (!board.has(next)) frontier.add(next);
+  return frontier;
+}
+
+/** True once the guessed countries link the start to the destination by land. */
+export function routeComplete(graph: BorderGraph, puzzle: RoutePuzzle, guessed: readonly string[]): boolean {
+  const board = boardOf(puzzle, guessed);
+  const seen = new Set([puzzle.start]);
+  const queue = [puzzle.start];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of graph.get(queue[i]) ?? []) {
+      if (!board.has(next) || seen.has(next)) continue;
+      if (next === puzzle.end) return true;
+      seen.add(next);
+      queue.push(next);
+    }
+  }
+  return false;
 }
 
 /**
- * Applies a step to the route (codes named so far, start and end excluded).
- * Stepping back onto a country already on the route (or the start) cuts the
- * loop off, so the drawn route stays a clean chain. The caller must already
- * have checked that `code` borders the current country.
+ * How far out of the way a country is: the extra border crossings a route through it
+ * takes over the shortest route. 0: it's on a shortest route.
  */
-export function applyStep(puzzle: RoutePuzzle, route: readonly string[], code: string): string[] {
-  if (code === puzzle.start) return [];
-  if (code === puzzle.end) return [...route];
-  const earlier = route.indexOf(code);
-  return earlier >= 0 ? route.slice(0, earlier + 1) : [...route, code];
-}
-
-/** True once the route touches the end: the last country named is the end or borders it. */
-export function reachesEnd(graph: BorderGraph, puzzle: RoutePuzzle, code: string): boolean {
-  return code === puzzle.end || areNeighbors(graph, code, puzzle.end);
+export function detourOf(graph: BorderGraph, puzzle: RoutePuzzle, code: string): number {
+  const fromStart = bfsDistances(graph, puzzle.start);
+  const fromEnd = bfsDistances(graph, puzzle.end);
+  const direct = fromStart.get(puzzle.end) ?? Infinity;
+  return (fromStart.get(code) ?? Infinity) + (fromEnd.get(code) ?? Infinity) - direct;
 }
 
 /* ------------------------------------------------------------------ */

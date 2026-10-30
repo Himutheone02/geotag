@@ -459,13 +459,11 @@ body {
     grid-column: 1 / -1;
   }
 
-  .game-shell[data-screen="setup"] > .daily-card {
+  .game-shell[data-screen="setup"] > .dailies {
     grid-column: 1;
-    position: sticky;
-    top: var(--space-5);
   }
 
-  .game-shell[data-screen="setup"] > .setup-only:not(.daily-card) {
+  .game-shell[data-screen="setup"] > .setup-only:not(.dailies) {
     grid-column: 2;
   }
 
@@ -1914,7 +1912,48 @@ html[data-skip-splash] .splash {
   min-width: 160px;
 }
 
-/* --- Daily Challenge --- */
+/* --- Daily Challenges: two cards under one heading --- */
+.dailies {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.dailies__head {
+  padding-inline: var(--space-2);
+}
+
+.dailies__title {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 600;
+}
+
+.dailies__note {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+/* Side by side on tablets; stacked on phones and in the desktop's narrow left column. */
+@media (min-width: 720px) and (max-width: 1023px) {
+  .dailies {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dailies__head {
+    grid-column: 1 / -1;
+  }
+}
+
+/* On desktop the pair stays in view beside the setup, when the screen is tall enough to hold it. */
+@media (min-width: 1024px) and (min-height: 860px) {
+  .game-shell[data-screen="setup"] > .dailies {
+    position: sticky;
+    top: var(--space-5);
+  }
+}
+
 .daily-card {
   display: flex;
   flex-wrap: wrap;
@@ -1957,6 +1996,40 @@ html[data-skip-splash] .splash {
 
 .daily-card__actions .share {
   margin-top: 0;
+}
+
+/* Played / Completed / Streak / Best: four small pressed-in clay wells. */
+.daily-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.daily-stats > div {
+  display: flex;
+  flex-direction: column-reverse; /* the number reads first; the label stays first for screen readers */
+  align-items: center;
+  padding: var(--space-2) var(--space-1);
+  border-radius: 18px 16px 20px 17px / 17px 20px 16px 18px;
+  background: rgb(255 255 255 / 0.55);
+  box-shadow:
+    inset 3px 4px 7px rgb(var(--shadow-rgb) / 0.14),
+    inset -3px -4px 7px rgb(255 255 255 / 0.8);
+}
+
+.daily-stats dt {
+  color: var(--daily-ink);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.daily-stats dd {
+  margin: 0;
+  font-size: var(--step-1);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--daily-ink);
 }
 
 .daily-badge {
@@ -2242,22 +2315,25 @@ html[data-challenge="pending"] .setup-only {
   font-weight: 500;
 }
 
-.initials {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.initial {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
-  background: var(--clay-surface-bright);
-  box-shadow: var(--clay-shadow-sm);
+.hint-name {
+  display: block;
   font-size: var(--step--1);
   font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* First Letter: "B _ _ _ _ _" in a pressed-in clay well, monospaced so the blanks line up. */
+.letter-pattern {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-sunk);
+  box-shadow: var(--clay-shadow-pressed);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: pre-wrap;
 }
 
 /* --- Map --- */
@@ -2265,7 +2341,7 @@ html[data-challenge="pending"] .setup-only {
   padding: clamp(var(--space-3), 2.5vw, var(--space-5));
 }
 
-/* --- Map taps (hint level 3, or after the round) --- */
+/* --- Map taps (after the round) --- */
 .map-stage {
   position: relative; /* anchors the tap tooltip */
 }
@@ -2387,13 +2463,6 @@ html[data-challenge="pending"] .setup-only {
   transform: scale(0.96);
 }
 
-.hint-tap {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--ink-soft);
-  font-size: var(--step--1);
-}
-
 /* The sea is a pressed-in clay well; land sits raised on it. */
 .world-map,
 .map-placeholder {
@@ -2486,23 +2555,26 @@ html[data-challenge="pending"] .setup-only {
   stroke-width: 1.2;
 }
 
-/* Hint stage 2: the missing country breathes on a spring until it's named. */
-.map-hint-shape {
-  fill: var(--focus-ring);
-  stroke: var(--focus-ring);
-  stroke-width: 2.5;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-  animation: map-breathe var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
+/* Fog of war (Pathfinding): every country takes the same fill, and a stroke of that same
+   fill closes the seams between them, so the land reads as one clay silhouette (the clay
+   filter still draws the coastlines). Named countries, endpoints and revealed outlines
+   are drawn on top as usual. */
+.world-map[data-fog] .map-country,
+.world-map[data-fog] .map-country--target {
+  fill: var(--map-target);
+  stroke: var(--map-target);
+  stroke-width: 0.8;
 }
 
-.map-hint-ring {
+/* Reveal Adjacent: the borders of the countries next to the route, as outlines. */
+.map-revealed path {
   fill: none;
-  stroke: var(--focus-ring);
-  stroke-width: 2.5;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: map-ring var(--spring-gentle-duration) var(--spring-gentle) infinite alternate;
+  stroke: #9488c2; /* a step darker than --map-target-edge, so hinted borders read against the silhouette */
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  animation: clay-fade-in 240ms ease-out both;
 }
 
 /* =====================================================================
@@ -2703,17 +2775,6 @@ html[data-challenge="pending"] .setup-only {
   }
 }
 
-@keyframes map-breathe {
-  from {
-    fill-opacity: 0.12;
-    stroke-opacity: 0.5;
-  }
-  to {
-    fill-opacity: 0.45;
-    stroke-opacity: 1;
-  }
-}
-
 @keyframes map-breathe-solid {
   from {
     fill-opacity: 0.45;
@@ -2723,16 +2784,7 @@ html[data-challenge="pending"] .setup-only {
   }
 }
 
-@keyframes map-ring {
-  from {
-    transform: scale(0.75);
-    opacity: 0.5;
-  }
-  to {
-    transform: scale(1.3);
-    opacity: 1;
-  }
-}
+
 
 @keyframes clay-bump {
   from {
@@ -2881,12 +2933,6 @@ html[data-challenge="pending"] .setup-only {
   .map-marker--missed,
   .party-row[data-current] {
     animation: clay-fade-in 120ms ease-out both;
-  }
-
-  .map-hint-shape,
-  .map-hint-ring {
-    animation: none;
-    fill-opacity: 0.35;
   }
 
   .map-endpoint--end path,

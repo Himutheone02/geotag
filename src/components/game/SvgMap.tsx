@@ -198,8 +198,6 @@ type SvgMapProps = {
   targets: readonly string[];
   /** Named countries. Must be a stable Set between renders (memoize it). */
   named: ReadonlySet<string>;
-  /** A missing country to pulse (hint stage 2), or null. */
-  highlight: string | null;
   /** Land routes: start and end, always highlighted and labeled. `reached` stops the end's pulse. Stable object. */
   endpoints?: { start: Endpoint; end: Endpoint; reached: boolean };
   /** Overrides the accessible description. */
@@ -229,6 +227,14 @@ type SvgMapProps = {
    * shortest-route countries. Ignored for named countries. Must be a stable Set.
    */
   missed?: ReadonlySet<string> | null;
+  /**
+   * Fog of war (Pathfinding): the land is one silhouette, with no borders between
+   * countries and no dots for small ones. Named countries, endpoints and `revealed`
+   * countries are still drawn.
+   */
+  fog?: boolean;
+  /** Countries whose borders are drawn as outlines (a hint), named or not. Must be a stable Set. */
+  revealed?: ReadonlySet<string> | null;
 };
 
 /** Clay depth for SVG: outer drop shadow + light top-left inner edge + dark bottom-right inner edge. */
@@ -287,7 +293,6 @@ function SvgMap({
   regions,
   targets,
   named,
-  highlight,
   endpoints,
   description,
   fills,
@@ -295,6 +300,8 @@ function SvgMap({
   onCountryClick,
   selected = null,
   missed = null,
+  fog = false,
+  revealed = null,
 }: SvgMapProps) {
   const geometry = useMemo(() => buildMapGeometry(frame, targets), [frame, targets]);
   // In themed rounds the whole map shares one color; in World Mode each country uses its continent's.
@@ -307,7 +314,6 @@ function SvgMap({
     const running = (e.currentTarget.getAnimations?.() ?? []).some((a) => a.playState !== "finished");
     if (!running) setSettled((prev) => new Set(prev).add(code));
   };
-  const hint = highlight && !named.has(highlight) ? geometry.targets.get(highlight) : undefined;
   const [vx, vy, vw, vh] = geometry.viewBox;
   const interactive = clickable !== null && onCountryClick !== undefined;
   // data-clickable gives the pointer cursor (and, on iOS, makes taps produce clicks).
@@ -331,6 +337,7 @@ function SvgMap({
       aria-label={description ?? `Map of ${label}: ${named.size} of ${targets.length} countries named`}
       data-theme={theme ?? undefined}
       data-interactive={interactive || undefined}
+      data-fog={fog || undefined}
       onClick={interactive ? handleClick : undefined}
       // Keep focus (and the phone keyboard) in the answer field while tapping the map.
       onMouseDown={interactive ? (e) => e.preventDefault() : undefined}
@@ -447,6 +454,8 @@ function SvgMap({
             );
           }
           const isMissed = !named.has(code) && missed?.has(code);
+          // In the fog a dot would give a small country away: only known ones get one.
+          if (fog && !named.has(code) && !isMissed && !revealed?.has(code)) return null;
           return (
             <circle
               key={named.has(code) ? `${code}-named` : isMissed ? `${code}-missed` : code}
@@ -463,6 +472,16 @@ function SvgMap({
           );
         })}
       </g>
+
+      {/* Revealed borders (a hint): outlines on their own unfiltered layer, above the land. */}
+      {revealed && revealed.size > 0 && (
+        <g className="map-revealed">
+          {[...revealed].map((code) => {
+            const t = geometry.targets.get(code) ?? geometry.shapes.find((sh) => sh.code === code);
+            return t?.d ? <path key={code} d={t.d} /> : null;
+          })}
+        </g>
+      )}
 
       {endpoints && (
         <g className="map-endpoints">
@@ -500,15 +519,6 @@ function SvgMap({
         <g className="map-selected" key={selected}>
           {selectedShape?.d && <path d={selectedShape.d} />}
           {selectedMarker && <circle cx={selectedMarker[0]} cy={selectedMarker[1]} r={geometry.markerRadius * 1.8} />}
-        </g>
-      )}
-
-      {hint && (
-        <g className="map-hint" data-code={hint.code}>
-          {hint.d && <path d={hint.d} className="map-hint-shape" />}
-          {hint.marker && (
-            <circle cx={hint.marker[0]} cy={hint.marker[1]} r={geometry.markerRadius * 2} className="map-hint-ring" />
-          )}
         </g>
       )}
 

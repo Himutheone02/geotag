@@ -7,6 +7,7 @@
  */
 
 import type { GameMode } from "@/app/CountryGuesser";
+import { addDays, type DailyKind } from "./dailySeed";
 import type { AnswerKind } from "./fuzzyMatch";
 
 /** One correct answer in a list round, for the recall heatmap. */
@@ -71,12 +72,68 @@ export type PartyResult = {
   finishedAt: number;
 };
 
+/**
+ * The first result of one Daily Challenge, kept in its own store, one record per kind and
+ * date: Daily Guessing and Daily Pathfinding each have their own history and streaks.
+ * (The round is also saved to the profile's rounds, like any other.)
+ */
+export type DailyRecord = {
+  /** "guessing:2026-10-29": one per kind and date, so only the first attempt is ever kept. */
+  id: string;
+  kind: DailyKind;
+  /** The puzzle's date (YYYY-MM-DD): the local date when the daily was started. */
+  date: string;
+  result: "won" | "forfeited";
+  timeMs: number;
+  startedAt: number;
+  finishedAt: number;
+  /** "Africa", "Portugal to China". */
+  label: string;
+  /** Countries named (guessing) or countries on the final route (pathfinding). */
+  correct: number;
+  /** Countries in the round (guessing) or the shortest route's length in between (pathfinding). */
+  target: number;
+  moves: number | null;
+  par: number | null;
+  hintsUsed: number;
+  /** The spoiler-free share text, so the setup screen can share it again. */
+  share?: string;
+};
+
+export const dailyId = (kind: DailyKind, date: string) => `${kind}:${date}`;
+
 const DB_NAME = "country-recall";
-/** 2: adds the party store. Upgrading keeps the rounds and settings stores as they are. */
-const DB_VERSION = 2;
+/**
+ * 2: adds the party store. 3: adds the dailies store, filled from the dailies already in
+ * the rounds store. Upgrading keeps the rounds, settings and party stores as they are.
+ */
+const DB_VERSION = 3;
 const ROUNDS = "rounds";
 const SETTINGS = "settings";
 const PARTY = "party";
+const DAILIES = "dailies";
+
+/** A daily saved before version 3 (a round with a `daily` date), as a daily record. */
+export function dailyFromRound(r: RoundRecord): DailyRecord | null {
+  if (!r.daily) return null;
+  const kind: DailyKind = r.mode === "pathfinding" ? "pathfinding" : "guessing";
+  return {
+    id: dailyId(kind, r.daily),
+    kind,
+    date: r.daily,
+    result: r.result,
+    timeMs: r.timeMs,
+    startedAt: r.finishedAt - r.timeMs,
+    finishedAt: r.finishedAt,
+    label: r.label,
+    correct: r.correct,
+    target: r.target,
+    moves: r.moves,
+    par: r.par,
+    hintsUsed: r.hintsUsed,
+    share: r.share,
+  };
+}
 
 let connection: Promise<IDBDatabase> | null = null;
 
@@ -86,12 +143,34 @@ function openDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(ROUNDS)) {
+      const hadRounds = db.objectStoreNames.contains(ROUNDS);
+      if (!hadRounds) {
         db.createObjectStore(ROUNDS, { keyPath: "id", autoIncrement: true }).createIndex("finishedAt", "finishedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS);
       if (!db.objectStoreNames.contains(PARTY)) {
         db.createObjectStore(PARTY, { keyPath: "id", autoIncrement: true }).createIndex("party", "party");
+      }
+      if (!db.objectStoreNames.contains(DAILIES)) {
+        const dailies = db.createObjectStore(DAILIES, { keyPath: "id" });
+        dailies.createIndex("kind", "kind");
+        // Carry over the dailies played before version 3: the earliest result per kind and date.
+        if (hadRounds) {
+          const tx = request.transaction!;
+          const found = new Map<string, DailyRecord>();
+          const cursor = tx.objectStore(ROUNDS).openCursor();
+          cursor.onsuccess = () => {
+            const c = cursor.result;
+            if (c) {
+              const record = dailyFromRound(c.value as RoundRecord);
+              const kept = record && found.get(record.id);
+              if (record && (!kept || record.finishedAt < kept.finishedAt)) found.set(record.id, record);
+              c.continue();
+            } else {
+              for (const record of found.values()) dailies.put(record);
+            }
+          };
+        }
       }
     };
     request.onsuccess = () => {
@@ -144,6 +223,29 @@ export async function listRounds(limit = Infinity): Promise<RoundRecord[] | null
   }
 }
 
+/**
+ * Saves a Daily Challenge result, unless one is already saved for that kind and date (only
+ * the first attempt counts). Resolves to false if it wasn't stored, for either reason.
+ */
+export async function saveDaily(record: DailyRecord): Promise<boolean> {
+  try {
+    await run(DAILIES, "readwrite", (s) => s.add(record));
+    return true;
+  } catch {
+    return false; // ConstraintError: already played today; or no storage
+  }
+}
+
+/** Every saved result of one daily, oldest first. Null if storage is unavailable. */
+export async function listDailies(kind: DailyKind): Promise<DailyRecord[] | null> {
+  try {
+    const all = await run(DAILIES, "readonly", (s) => s.index("kind").getAll(kind) as IDBRequest<DailyRecord[]>);
+    return all.sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return null;
+  }
+}
+
 /** Saves one player's result in a pass-and-play party. Resolves to false if it couldn't be stored. */
 export async function savePartyResult(result: Omit<PartyResult, "id">): Promise<boolean> {
   try {
@@ -164,9 +266,19 @@ export async function listPartyResults(party: string): Promise<PartyResult[] | n
   }
 }
 
+/** Clears the profile: every round and every daily result. */
 export async function clearRounds(): Promise<boolean> {
   try {
-    await run(ROUNDS, "readwrite", (s) => s.clear());
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      // One transaction: both stores are cleared, or neither is.
+      const tx = db.transaction([ROUNDS, DAILIES], "readwrite");
+      tx.objectStore(ROUNDS).clear();
+      tx.objectStore(DAILIES).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error("Transaction aborted"));
+    });
     return true;
   } catch {
     return false;
@@ -256,4 +368,35 @@ export function summarize(rounds: readonly RoundRecord[]): ProfileSummary {
       };
     }),
   };
+}
+
+export type DailyStats = {
+  played: number;
+  /** Completed: every country named, or the route connected. */
+  won: number;
+  /** Days in a row completed, up to today (or up to yesterday, while today is still open). */
+  streak: number;
+  bestStreak: number;
+};
+
+/**
+ * Stats for one daily. A streak is consecutive calendar days completed: a give-up or a
+ * missed day ends it. Today not played yet doesn't end it; it's still open until midnight.
+ */
+export function dailyStats(records: readonly DailyRecord[], today: string): DailyStats {
+  const won = new Set(records.filter((r) => r.result === "won").map((r) => r.date));
+  let bestStreak = 0;
+  for (const date of won) {
+    if (won.has(addDays(date, -1))) continue; // not the first day of a run
+    let length = 1;
+    while (won.has(addDays(date, length))) length++;
+    bestStreak = Math.max(bestStreak, length);
+  }
+  let streak = 0;
+  let day = won.has(today) ? today : addDays(today, -1);
+  while (won.has(day)) {
+    streak++;
+    day = addDays(day, -1);
+  }
+  return { played: new Set(records.map((r) => r.date)).size, won: won.size, streak, bestStreak };
 }

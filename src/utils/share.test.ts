@@ -9,19 +9,15 @@ const graph = buildBorderGraph(toSovereignStates(snapshot as RawCountry[]));
 const puzzle: RoutePuzzle = { start: "PRT", end: "POL", par: 3, shortest: ["PRT", "ESP", "FRA", "DEU", "POL"] };
 
 describe("routeGrid", () => {
-  it("is all green for a shortest route", () => {
+  it("is all green for a shortest route, built from either end", () => {
     expect(routeGrid(graph, puzzle, ["ESP", "FRA", "DEU"])).toBe("🟩🟩🟩");
+    expect(routeGrid(graph, puzzle, ["DEU", "ESP", "FRA"])).toBe("🟩🟩🟩");
   });
 
-  it("marks sideways moves yellow and moves away red, steps back included", () => {
-    // Andorra is as far from Poland as Spain is (both border France): a sideways move.
+  it("marks a guess one crossing out of the way yellow, and dead ends or the wrong side red", () => {
+    // Andorra: a route through it takes one crossing more. Russia and Italy: two or more.
     expect(routeGrid(graph, puzzle, ["ESP", "AND", "FRA", "DEU"])).toBe("🟩🟨🟩🟩");
-    // Spain, back to Portugal (away), Spain again, France, Germany.
-    expect(routeGrid(graph, puzzle, ["ESP", "PRT", "ESP", "FRA", "DEU"])).toBe("🟩🟥🟩🟩🟩");
-  });
-
-  it("doesn't count naming the destination as a move", () => {
-    expect(routeGrid(graph, puzzle, ["ESP", "FRA", "DEU", "POL"])).toBe("🟩🟩🟩");
+    expect(routeGrid(graph, puzzle, ["RUS", "ESP", "ITA", "FRA", "DEU"])).toBe("🟥🟩🟥🟩🟩");
   });
 });
 

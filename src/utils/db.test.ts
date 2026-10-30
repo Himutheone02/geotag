@@ -3,14 +3,20 @@ import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearRounds,
+  dailyFromRound,
+  dailyId,
+  dailyStats,
   getSetting,
+  listDailies,
   listPartyResults,
   listRounds,
   resetDbConnection,
+  saveDaily,
   savePartyResult,
   saveRound,
   setSetting,
   summarize,
+  type DailyRecord,
   type RoundRecord,
 } from "./db";
 
@@ -154,5 +160,129 @@ describe("party results (pass-and-play)", () => {
     resetDbConnection();
     expect(await savePartyResult(result("x", 1, 1))).toBe(false);
     expect(await listPartyResults("x")).toBeNull();
+  });
+});
+
+describe("dailies (one store, a record per kind and date)", () => {
+  const daily = (kind: DailyRecord["kind"], date: string, overrides: Partial<DailyRecord> = {}): DailyRecord => ({
+    id: dailyId(kind, date),
+    kind,
+    date,
+    result: "won",
+    timeMs: 60_000,
+    startedAt: 1_000,
+    finishedAt: 61_000,
+    label: kind === "guessing" ? "Africa" : "Portugal to China",
+    correct: 5,
+    target: 5,
+    moves: kind === "pathfinding" ? 6 : null,
+    par: kind === "pathfinding" ? 5 : null,
+    hintsUsed: 0,
+    ...overrides,
+  });
+
+  it("keeps only the first result per kind and date, and lists each kind apart, oldest first", async () => {
+    expect(await saveDaily(daily("guessing", "2026-10-29"))).toBe(true);
+    expect(await saveDaily(daily("guessing", "2026-10-29", { result: "forfeited" }))).toBe(false); // a second try
+    expect(await saveDaily(daily("pathfinding", "2026-10-29"))).toBe(true); // the other daily, same date
+    expect(await saveDaily(daily("guessing", "2026-10-28"))).toBe(true);
+    expect((await listDailies("guessing"))!.map((r) => [r.date, r.result])).toEqual([
+      ["2026-10-28", "won"],
+      ["2026-10-29", "won"],
+    ]);
+    expect((await listDailies("pathfinding"))!.map((r) => r.id)).toEqual(["pathfinding:2026-10-29"]);
+  });
+
+  it("clearing the history clears the dailies too", async () => {
+    await saveDaily(daily("guessing", "2026-10-29"));
+    await saveRound(round());
+    expect(await clearRounds()).toBe(true);
+    expect(await listDailies("guessing")).toEqual([]);
+    expect(await listRounds()).toEqual([]);
+  });
+
+  it("upgrading a version-2 profile moves its dailies into the new store, by kind", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open("country-recall", 2);
+      open.onupgradeneeded = () => {
+        const db = open.result;
+        db.createObjectStore("rounds", { keyPath: "id", autoIncrement: true }).createIndex("finishedAt", "finishedAt");
+        db.createObjectStore("settings");
+        db.createObjectStore("party", { keyPath: "id", autoIncrement: true }).createIndex("party", "party");
+      };
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction("rounds", "readwrite");
+        const rounds = tx.objectStore("rounds");
+        rounds.add(round({ label: "Africa", daily: "2026-10-27", finishedAt: 5_000_000, timeMs: 60_000 }));
+        rounds.add(round({ mode: "pathfinding", roundKey: "PRT-CHN", label: "Portugal to China", daily: "2026-10-28", moves: 6, par: 5 }));
+        rounds.add(round({ label: "Africa again", daily: "2026-10-27", finishedAt: 9_000_000 })); // a duplicate: later
+        rounds.add(round({ label: "ordinary", daily: null }));
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+      open.onerror = () => reject(open.error);
+    });
+    const guessing = (await listDailies("guessing"))!;
+    expect(guessing.map((r) => [r.id, r.label, r.startedAt])).toEqual([["guessing:2026-10-27", "Africa", 5_000_000 - 60_000]]);
+    expect((await listDailies("pathfinding"))!.map((r) => [r.id, r.moves, r.par])).toEqual([["pathfinding:2026-10-28", 6, 5]]);
+    expect(await listRounds()).toHaveLength(4); // the rounds themselves stay
+  });
+
+  it("dailyFromRound ignores ordinary rounds", () => {
+    expect(dailyFromRound({ ...round(), daily: null })).toBeNull();
+    expect(dailyFromRound({ ...round(), mode: "historical", daily: "2026-10-01" })!.kind).toBe("guessing");
+  });
+
+  it("reports failure quietly without IndexedDB", async () => {
+    // @ts-expect-error simulate storage being unavailable
+    delete globalThis.indexedDB;
+    resetDbConnection();
+    expect(await saveDaily(daily("guessing", "2026-10-29"))).toBe(false);
+    expect(await listDailies("guessing")).toBeNull();
+  });
+});
+
+describe("dailyStats", () => {
+  const rec = (date: string, result: DailyRecord["result"] = "won") => ({ date, result }) as DailyRecord;
+
+  it("counts days played and completed", () => {
+    const stats = dailyStats([rec("2026-10-01"), rec("2026-10-02", "forfeited"), rec("2026-10-05")], "2026-10-05");
+    expect(stats).toMatchObject({ played: 3, won: 2 });
+  });
+
+  it("a streak is consecutive days completed, up to today", () => {
+    const records = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29"].map((d) => rec(d));
+    expect(dailyStats(records, "2026-10-29")).toMatchObject({ streak: 4, bestStreak: 4 });
+  });
+
+  it("today not played yet keeps the streak alive until midnight; a missed day ends it", () => {
+    const records = [rec("2026-10-27"), rec("2026-10-28")];
+    expect(dailyStats(records, "2026-10-29").streak).toBe(2); // today still open
+    expect(dailyStats(records, "2026-10-30").streak).toBe(0); // the 29th was missed
+    expect(dailyStats(records, "2026-10-30").bestStreak).toBe(2);
+  });
+
+  it("a give-up ends a streak; the best streak remembers the longest run", () => {
+    const records = [
+      rec("2026-09-01"),
+      rec("2026-09-02"),
+      rec("2026-09-03"),
+      rec("2026-09-04", "forfeited"),
+      rec("2026-09-05"),
+    ];
+    expect(dailyStats(records, "2026-09-05")).toEqual({ played: 5, won: 4, streak: 1, bestStreak: 3 });
+  });
+
+  it("runs across month and year ends", () => {
+    const records = [rec("2026-12-30"), rec("2026-12-31"), rec("2027-01-01")];
+    expect(dailyStats(records, "2027-01-01")).toMatchObject({ streak: 3, bestStreak: 3 });
+  });
+
+  it("is all zeros with nothing played", () => {
+    expect(dailyStats([], "2026-10-29")).toEqual({ played: 0, won: 0, streak: 0, bestStreak: 0 });
   });
 });

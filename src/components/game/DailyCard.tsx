@@ -3,70 +3,109 @@
 import { useEffect, useState } from "react";
 import ClayButton from "@/components/ui/ClayButton";
 import ClayCard from "@/components/ui/ClayCard";
-import { listRounds, type RoundRecord } from "@/utils/db";
-import type { DailyChallenge } from "@/utils/dailySeed";
+import { dailyStats, listDailies, type DailyRecord } from "@/utils/db";
+import type { DailyChallenge, DailyKind } from "@/utils/dailySeed";
 import ShareResult from "./ShareResult";
 import { formatElapsed } from "./Timer";
 
+export const DAILY_TITLES: Record<DailyKind, string> = {
+  guessing: "Daily Guessing",
+  pathfinding: "Daily Pathfinding",
+};
+
 type DailyCardProps<C extends string> = {
   challenge: DailyChallenge<C>;
-  /** Starts today's challenge. `replay`: today's result is already saved, so this play won't count as the daily. */
+  /** Display name of a country code (route endpoints). */
+  nameOf: (code: string) => string;
+  /** Starts this daily. `replay`: today's result is already saved, so this play won't count. */
   onPlay: (replay: boolean) => void;
 };
 
-/** "Monday, October 26", from a YYYY-MM-DD key, in the player's language. */
-function longDate(key: string): string {
+/** "Thursday, October 29", from a YYYY-MM-DD key, in the player's language. */
+export function longDate(key: string): string {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
+/** "54/54 in 05:12", "6 moves in 01:12", "gave up after 6 moves". */
+export function dailyOutcome(record: DailyRecord): string {
+  if (record.kind === "pathfinding") {
+    const moves = `${record.moves} ${record.moves === 1 ? "move" : "moves"}`;
+    return record.result === "won" ? `${moves} in ${formatElapsed(record.timeMs)}` : `gave up after ${moves}`;
+  }
+  return `${record.correct}/${record.target} in ${formatElapsed(record.timeMs)}${record.result === "won" ? "" : " (gave up)"}`;
+}
+
 /**
- * The setup screen's Daily Challenge: what today's puzzle is, and once it has
- * been played, the first result and its share text.
+ * One Daily Challenge on the setup screen: what today's puzzle is, the player's stats for
+ * this daily (played, completed, streaks), and once today's is played, its first result and
+ * share text. Each daily keeps its own records, in the dailies store.
  */
-export default function DailyCard<C extends string>({ challenge, onPlay }: DailyCardProps<C>) {
-  // undefined: still checking the profile. null: not played today (or nothing saved).
-  const [result, setResult] = useState<RoundRecord | null | undefined>(undefined);
+export default function DailyCard<C extends string>({ challenge, nameOf, onPlay }: DailyCardProps<C>) {
+  const { kind, date } = challenge;
+  // undefined: still reading the profile. null: storage unavailable.
+  const [records, setRecords] = useState<DailyRecord[] | null | undefined>(undefined);
 
   useEffect(() => {
     let live = true;
-    void listRounds().then((rounds) => {
-      if (!live) return;
-      const today = (rounds ?? []).filter((r) => r.daily === challenge.date).sort((a, b) => a.finishedAt - b.finishedAt);
-      setResult(today[0] ?? null);
+    void listDailies(kind).then((list) => {
+      if (live) setRecords(list);
     });
     return () => {
       live = false;
     };
-  }, [challenge.date]);
+  }, [kind, date]);
 
+  const today = records?.find((r) => r.date === date) ?? null;
+  const stats = records ? dailyStats(records, date) : null;
+  const headingId = `daily-${kind}-heading`;
   const what =
-    challenge.kind === "pathfinding"
-      ? `A land route with ${challenge.puzzle.par} countries in between.`
-      : `Every country in ${challenge.continent}.`;
-  const outcome =
-    result &&
-    (result.mode === "pathfinding"
-      ? result.result === "won"
-        ? `${result.moves} moves in ${formatElapsed(result.timeMs)}`
-        : `gave up after ${result.moves} moves`
-      : `${result.correct}/${result.target} in ${formatElapsed(result.timeMs)}`);
+    challenge.kind === "pathfinding" ? (
+      <>
+        Connect <strong>{nameOf(challenge.puzzle.start)}</strong> and <strong>{nameOf(challenge.puzzle.end)}</strong>: the
+        shortest route has {challenge.puzzle.par} countries in between.
+      </>
+    ) : (
+      <>
+        Name every country in {challenge.continent === "Americas" && "the "}
+        <strong>{challenge.continent}</strong>.
+      </>
+    );
 
   return (
-    <ClayCard as="section" className="daily-card setup-only" aria-labelledby="daily-heading">
+    <ClayCard as="section" className="daily-card" data-kind={kind} aria-labelledby={headingId}>
       <div className="daily-card__text">
-        <p className="daily-card__date">{longDate(challenge.date)}</p>
-        <h2 id="daily-heading" className="card-title">
-          Daily Challenge
-        </h2>
-        <p className="card-lead">{what} The same puzzle for everyone today.</p>
-        {result && <p className="daily-card__done">Done today: {outcome}.</p>}
+        <h3 id={headingId} className="card-title">
+          {DAILY_TITLES[kind]}
+        </h3>
+        <p className="card-lead">{what}</p>
+        {today && <p className="daily-card__done">Done today: {dailyOutcome(today)}.</p>}
+        {stats && stats.played > 0 && (
+          <dl className="daily-stats" aria-label={`${DAILY_TITLES[kind]} stats`}>
+            <div>
+              <dt>Played</dt>
+              <dd>{stats.played}</dd>
+            </div>
+            <div>
+              <dt>Completed</dt>
+              <dd>{stats.won}</dd>
+            </div>
+            <div>
+              <dt>Streak</dt>
+              <dd>{stats.streak}</dd>
+            </div>
+            <div>
+              <dt>Best</dt>
+              <dd>{stats.bestStreak}</dd>
+            </div>
+          </dl>
+        )}
       </div>
       <div className="daily-card__actions">
-        <ClayButton onClick={() => onPlay(Boolean(result))} disabled={result === undefined}>
-          {result ? "Play again" : "Play today's challenge"}
+        <ClayButton onClick={() => onPlay(today !== null)} disabled={records === undefined}>
+          {today ? "Play again" : "Play"}
         </ClayButton>
-        {result?.share && <ShareResult text={result.share} preview={false} size="sm" />}
+        {today?.share && <ShareResult text={today.share} preview={false} size="sm" />}
       </div>
     </ClayCard>
   );

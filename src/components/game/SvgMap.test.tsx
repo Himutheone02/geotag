@@ -70,7 +70,7 @@ describe("SvgMap", () => {
   let container: HTMLDivElement;
   let root: Root;
   const targets = codesIn("Europe");
-  const render = (named: string[], highlight: string | null = null) =>
+  const render = (named: string[], fog: { fog?: boolean; revealed?: ReadonlySet<string> | null } = {}) =>
     act(() =>
       root.render(
         <SvgMap
@@ -80,7 +80,7 @@ describe("SvgMap", () => {
           regions={regions}
           targets={targets}
           named={new Set(named)}
-          highlight={highlight}
+          {...fog}
         />,
       ),
     );
@@ -112,17 +112,31 @@ describe("SvgMap", () => {
     expect(container.querySelector('.map-named[data-code="FRA"]')!.hasAttribute("data-region")).toBe(false);
   });
 
-  it("pulses the hinted country until it is named", () => {
-    render([], "POL");
-    expect(container.querySelector(".map-hint")!.getAttribute("data-code")).toBe("POL");
-    expect(container.querySelector(".map-hint-shape")).not.toBeNull();
-    render(["POL"], "POL");
-    expect(container.querySelector(".map-hint")).toBeNull();
+  it("has no hint layer: hints don't mark countries on the map", () => {
+    render([]);
+    expect(container.querySelector(".map-hint, .map-hint-shape, .map-hint-ring")).toBeNull();
   });
 
-  it("pulses a ring around a hinted microstate", () => {
-    render([], "SMR");
-    expect(container.querySelector(".map-hint-ring")).not.toBeNull();
+  it("fog of war: flags the map, hides the dots of unknown microstates, and still draws named countries", () => {
+    render([], { fog: false });
+    expect(container.querySelector("svg")!.hasAttribute("data-fog")).toBe(false);
+    expect(container.querySelector('.map-marker[data-code="SMR"]')).not.toBeNull();
+    render(["FRA", "VAT"], { fog: true });
+    expect(container.querySelector("svg")!.getAttribute("data-fog")).toBe("true");
+    expect(container.querySelector('.map-marker[data-code="SMR"]')).toBeNull(); // a dot would give it away
+    expect(container.querySelector('.map-marker--named[data-code="VAT"]')).not.toBeNull();
+    expect(container.querySelector('.map-named[data-code="FRA"]')).not.toBeNull();
+    // The land itself is still drawn (the silhouette); CSS hides the borders between countries.
+    expect(container.querySelectorAll(".map-country").length).toBeGreaterThan(40);
+  });
+
+  it("outlines revealed countries on their own layer, and shows their dots in the fog", () => {
+    render([], { fog: true, revealed: new Set(["POL", "SMR"]) });
+    const outlines = [...container.querySelectorAll(".map-revealed path")];
+    expect(outlines.length).toBe(2);
+    expect(container.querySelector('.map-marker[data-code="SMR"]')).not.toBeNull();
+    render([], { fog: true, revealed: new Set() });
+    expect(container.querySelector(".map-revealed")).toBeNull();
   });
 });
 
@@ -142,7 +156,6 @@ describe("SvgMap clicks", () => {
           regions={regions}
           targets={targets}
           named={named}
-          highlight={null}
           onCountryClick={onCountryClick}
           {...props}
         />,

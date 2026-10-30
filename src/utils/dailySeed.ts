@@ -1,5 +1,6 @@
 /**
- * Daily Challenge: one puzzle per calendar date, the same for every player.
+ * Daily Challenges: two puzzles per calendar date (Daily Guessing and Daily
+ * Pathfinding), the same for every player. Both change at local midnight.
  *
  * The date string (YYYY-MM-DD) is hashed into a 32-bit seed for Mulberry32, a
  * tiny, fast PRNG. Every choice below is made from sorted lists, never from
@@ -53,29 +54,60 @@ export function seededRandom(key: string): () => number {
   return mulberry32(hashString(`${DAILY_SALT}:${key}`));
 }
 
-export type DailyChallenge<C extends string> =
-  | { date: string; kind: "pathfinding"; puzzle: RoutePuzzle }
-  | { date: string; kind: "continent"; continent: C };
+/** The two daily puzzles. Each has its own seed and its own record of results. */
+export type DailyKind = "guessing" | "pathfinding";
+export const DAILY_KINDS: readonly DailyKind[] = ["guessing", "pathfinding"];
+
+/** Daily Guessing: name every country in one continent. */
+export type DailyGuessing<C extends string> = { kind: "guessing"; date: string; continent: C };
+/** Daily Pathfinding: connect two countries. */
+export type DailyPathfinding = { kind: "pathfinding"; date: string; puzzle: RoutePuzzle };
+export type DailyChallenge<C extends string> = DailyGuessing<C> | DailyPathfinding;
 
 /**
- * Today's challenge: a Pathfinding route on about half of days, otherwise
- * naming every country in one continent.
- *
- * The same date and border data always give the same challenge, whatever order the
- * countries are listed in (routes are picked from sorted codes). Every player gets the
- * same data, the bundled countries.json, so every player gets the same puzzle; updating
- * that file (npm run snapshot) and redeploying can change future dailies.
+ * Today's Daily Guessing round. Seeded with "guess:<date>", apart from the route, so
+ * changing how routes are picked never changes which continent comes up, and vice versa.
  */
-export function dailyChallenge<C extends string>(
-  date: string,
-  graph: BorderGraph,
-  continents: readonly C[],
-): DailyChallenge<C> {
-  const random = seededRandom(date);
-  if (random() < 0.5) {
-    const puzzle = pickRoute(graph, { random });
-    if (puzzle) return { date, kind: "pathfinding", puzzle };
-  }
+export function dailyGuessing<C extends string>(date: string, continents: readonly C[]): DailyGuessing<C> {
+  const random = seededRandom(`guess:${date}`);
   const sorted = [...continents].sort();
-  return { date, kind: "continent", continent: sorted[Math.floor(random() * sorted.length)] };
+  return { kind: "guessing", date, continent: sorted[Math.floor(random() * sorted.length)] };
+}
+
+/**
+ * Today's Daily Pathfinding route, seeded with "route:<date>". Null only if the border
+ * data has no route of the right length at all.
+ *
+ * The same date and border data always give the same route, whatever order the countries
+ * are listed in (routes are picked from sorted codes). Every player gets the same data, the
+ * bundled countries.json, so every player gets the same puzzle; updating that file
+ * (npm run snapshot) and redeploying can change future dailies.
+ */
+export function dailyPathfinding(date: string, graph: BorderGraph): DailyPathfinding | null {
+  const puzzle = pickRoute(graph, { random: seededRandom(`route:${date}`) });
+  return puzzle ? { kind: "pathfinding", date, puzzle } : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Local midnight                                                      */
+/* ------------------------------------------------------------------ */
+
+/** Local midnight at the start of the day `at` falls in (ms). */
+export function startOfLocalDay(at: number = Date.now()): number {
+  return new Date(at).setHours(0, 0, 0, 0);
+}
+
+/**
+ * The next local midnight after `at` (ms): when both dailies unlock. setHours(24) rolls
+ * over to the next calendar day, so a 23- or 25-hour day (daylight saving) still ends at
+ * midnight, not 24 hours after the last one.
+ */
+export function nextLocalMidnight(at: number = Date.now()): number {
+  return new Date(startOfLocalDay(at)).setHours(24, 0, 0, 0);
+}
+
+/** The calendar date `days` after a YYYY-MM-DD key (negative: before). */
+export function addDays(key: string, days: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return dateKey(new Date(y, m - 1, d + days));
 }

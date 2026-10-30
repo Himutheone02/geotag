@@ -15,22 +15,20 @@ export const PACE_GOOD_SECONDS = 6;
 export const PACE_OK_SECONDS = 15;
 
 /**
- * Pathfinding: one square per move.
- * 🟩 moved one country closer to the destination, 🟨 stayed as far, 🟥 moved away
- * (including steps back). A perfect route is all green, one square per country in between.
+ * Pathfinding: one square per guess, by how far out of the way that country was.
+ * 🟩 on a shortest route, 🟨 one border crossing out of the way, 🟥 further (a dead end,
+ * or the wrong side). A perfect route is all green, one square per country in between.
  */
-export function routeGrid(graph: BorderGraph, puzzle: RoutePuzzle, path: readonly string[]): string {
-  const toEnd = bfsDistances(graph, puzzle.end);
-  let previous = puzzle.start;
-  let grid = "";
-  for (const code of path) {
-    if (code === puzzle.end) continue; // naming the destination itself isn't a move
-    const before = toEnd.get(previous) ?? Infinity;
-    const after = toEnd.get(code) ?? Infinity;
-    grid += after < before ? SQUARES.good : after === before ? SQUARES.ok : SQUARES.bad;
-    previous = code;
-  }
-  return grid;
+export function routeGrid(graph: BorderGraph, puzzle: RoutePuzzle, guesses: readonly string[]): string {
+  const fromStart = bfsDistances(graph, puzzle.start);
+  const fromEnd = bfsDistances(graph, puzzle.end);
+  const direct = fromStart.get(puzzle.end) ?? Infinity;
+  return guesses
+    .map((code) => {
+      const detour = (fromStart.get(code) ?? Infinity) + (fromEnd.get(code) ?? Infinity) - direct;
+      return detour === 0 ? SQUARES.good : detour === 1 ? SQUARES.ok : SQUARES.bad;
+    })
+    .join("");
 }
 
 /**
@@ -76,8 +74,8 @@ export type ShareInput = {
   /** The autocomplete list showed answers during the round. */
   assisted: boolean;
 } & (
-  | { kind: "route"; moves: number; par: number }
-  | { kind: "list"; emoji: string; named: number; total: number; hints: number }
+  | { kind: "route"; moves: number; par: number; hints?: number }
+  | { kind: "list"; emoji: string; named: number; total: number; hints: number; subject?: string }
 );
 
 /**
@@ -91,10 +89,12 @@ export function buildShareText(input: ShareInput): string {
   let stats: string;
   if (input.kind === "route") {
     const moves = `${input.moves} ${input.moves === 1 ? "move" : "moves"}`;
-    stats = input.won ? `🗺️ ${moves} (shortest ${input.par}) ${time}` : `🗺️ 🏳️ gave up after ${moves} ${time}`;
+    const hints = input.hints ? ` 💡 ${input.hints}` : "";
+    stats = input.won ? `🗺️ ${moves} (shortest ${input.par}) ${time}${hints}` : `🗺️ 🏳️ gave up after ${moves} ${time}${hints}`;
   } else {
     const hints = input.hints > 0 ? ` 💡 ${input.hints}` : "";
-    stats = `${input.emoji} ${input.named}/${input.total}${input.won ? "" : " 🏳️"} ${time}${hints}`;
+    const subject = input.subject ? `${input.subject} ` : "";
+    stats = `${input.emoji} ${subject}${input.named}/${input.total}${input.won ? "" : " 🏳️"} ${time}${hints}`;
   }
   return [heading, stats, input.grid, input.assisted ? "🔤 with suggestions" : ""].filter(Boolean).join("\n");
 }

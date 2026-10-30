@@ -215,7 +215,7 @@ export default function ProfilePanel({ headingId, countries }: { headingId?: str
         {confirmingClear ? (
           <>
             <p className="profile-clear__question" role="alert">
-              Delete all {plural(rounds.length, "saved round")}? This can&apos;t be undone.
+              Delete all {plural(rounds.length, "saved round")} and your daily streaks? This can&apos;t be undone.
             </p>
             <ClayButton size="sm" onClick={clearHistory}>
               Delete history
@@ -431,7 +431,6 @@ function RecallHeatmap({ rounds, countries }: { rounds: readonly RoundRecord[]; 
             regions={regions}
             targets={targets}
             named={NOTHING}
-            highlight={null}
             fills={fills}
             description={`World map of your recall speed: ${plural(stats.length, "country", "countries")} timed, colored from green (fast) to red (slow).`}
           />

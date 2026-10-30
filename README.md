@@ -1,6 +1,6 @@
 # geotag
 
-Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: cross from one country to another by naming land neighbours. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and three progressive hints help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats under **Profile & Stats** in the header. List rounds can be played for **capitals** instead of countries, a seeded **Daily Challenge** gives everyone the same puzzle each day, and results can be shared as a spoiler-free emoji grid.
+Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: connect two countries by naming land neighbours, building from either end, on a map hidden in fog. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and two hints per round help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats under **Profile & Stats** in the header. List rounds can be played for **capitals** instead of countries, two seeded **Daily Challenges** (Daily Guessing and Daily Pathfinding) give everyone the same puzzles each day, unlocking at local midnight, and results can be shared as a spoiler-free emoji grid.
 
 ```bash
 npm install
@@ -25,10 +25,10 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/ui/ClayInput.tsx` | Clay text field with an always-present label (`hideLabel` hides it visually only). Forwards `ref` (React 19). Given `suggestions`, it becomes an ARIA combobox with a floating `ClayCard` list (arrows, Enter, Escape, click). |
 | `src/components/ui/ClayButton.tsx` | Clay button, `primary` or `soft`, `md` or `sm`; lifts on hover, sinks when pressed. |
 | `src/components/game/Timer.tsx` | Isolated count-up stopwatch (MM:SS). Owns its own state, so ticks never re-render the game. |
-| `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, pulses the stage-2 hint, and takes a static color per country (`fills`) for the heatmap. Optional clicks (`clickable`, `onCountryClick`, `selected`). Memoized and lazy-loaded. |
+| `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, draws Pathfinding's fog of war (`fog`) and hint outlines (`revealed`), and takes a static color per country (`fills`) for the heatmap. Optional clicks (`clickable`, `onCountryClick`, `selected`). Memoized and lazy-loaded. |
 | `src/components/game/MapTooltip.tsx` | The clay tooltip shown by a map tap: absolutely positioned at the tap, kept inside the map, springs open. No library. |
-| `src/components/game/HintPanel.tsx` | "Get a hint (n/3)" button and revealed hints, plus the pure helpers `pickHintTarget` and `initialsOf`. |
-| `src/components/game/DailyCard.tsx` | The setup screen's Daily Challenge card: today's puzzle, and once played, the first result with its Share button. |
+| `src/components/game/HintPanel.tsx` | The hint card: one button naming the next hint ("Capital City (0/2)"), and the hints given so far. Generic: the round passes its own two hints. Pure helpers `pickHintTarget` (a random missing country), `letterPattern` ("B _ _ _ _ _") and `letterCount`. |
+| `src/components/game/DailyCard.tsx` | One Daily Challenge card (Daily Guessing or Daily Pathfinding): today's puzzle, that daily's stats (played, completed, streak, best), and once played, the first result with its Share button. |
 | `src/components/game/ShareResult.tsx` | "Share result": copies the share text with `navigator.clipboard.writeText`; if the clipboard is unavailable the text stays visible to copy by hand. |
 | `src/components/game/SplashScreen.tsx` | Boot-up screen: the full logo, the coral PLAY button and a loader. PLAY unlocks once IndexedDB is open and the map data has loaded. |
 | `src/components/game/PartyBoard.tsx` | Party Mode's leaderboard and `rankParty` (finishers by time, then moves; players who gave up last, unranked). |
@@ -39,10 +39,10 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
 | `src/utils/fuzzyMatch.ts` | Matching: `normalize`, `buildIndex` (country names, or capitals with `"capitals"`), `matchCountry`, `liveMatch` (per-keystroke rules), `suggestCountries` (autocomplete ranking), `answerForInput`, and the `Country` type. |
 | `src/utils/haptics.ts` | `vibrate()` (30 ms, feature-checked, never throws), `canVibrate()` and `hapticsUseful()` (the API exists and the pointer is coarse). |
-| `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD) and `dailyChallenge` (seeded route or continent). |
+| `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD), the two dailies (`dailyGuessing`, `dailyPathfinding`, each with its own seed), and local-midnight helpers (`startOfLocalDay`, `nextLocalMidnight`, `addDays`). |
 | `src/utils/share.ts` | Spoiler-free share text: `routeGrid`, `paceGrid`, `buildShareText`. |
-| `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, version 2, stores `rounds`, `settings` and `party`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, `savePartyResult`/`listPartyResults`, and the pure `summarize`. Upgrading from version 1 keeps existing rounds and settings. Every call fails soft when storage is unavailable. |
-| `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and step rules (`applyStep`, `reachesEnd`). |
+| `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, version 3, stores `rounds`, `settings`, `party` and `dailies`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, `savePartyResult`/`listPartyResults`, `saveDaily`/`listDailies`, and the pure `summarize` and `dailyStats`. Upgrading keeps existing rounds and settings, and version 3 copies the dailies already played into `dailies`. Every call fails soft when storage is unavailable. |
+| `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and the free-roam rules: `routeFrontier` (what may be named next), `routeComplete` (the named countries join the two ends) and `detourOf` (for the share grid). |
 | `src/data/countries.json` | Country data: the app's only source, bundled at build time (the REST Countries fields the app uses). Nothing is fetched at runtime. |
 | `src/data/world-map.json` | Map data: Natural Earth 1:50m outlines keyed by cca3, simplified to 15% of points (163 KB, 52 KB gzipped), plus a marker point per sovereign state. Built by `scripts/build-map.mjs`. |
 | `src/data/loadCountries.ts` | Data loading: `getSovereignStates()` reads `countries.json` (no network), the sovereign-state rule (193 UN members + Vatican City + Palestine = 195), curated aliases (Ivory Coast, Burma, Holland, UK, DRC…), and `resolveEmpires` (empire name lists to country codes). |
@@ -63,14 +63,25 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 
 ## Pathfinding
 
+Free roam, as in Travle: there is no "where you are".
+
 1. **The puzzle:** you get a random start and destination connected by land, with 3–7 countries in between on the shortest route. Neighbouring pairs would be a zero-move round, and the data's longest routes (17 in between) are a slog.
-2. **Each step must border the country you're in.** The prompt always says where you are. Typing uses the same `liveMatch` and `ClayInput` as every other mode, with the current country's neighbours as the scope. Naming a country that doesn't border yours says so ("France doesn't border Portugal.").
-3. **Stepping back is allowed:** naming a country already on your route cuts the loop off, so the drawn route stays a clean chain. The step still counts as a move.
-4. **Finish:** the route is complete as soon as the last country you named borders the destination (or is the destination). The result compares your moves with the shortest route and shows one shortest route.
-5. **Give Up:** a small, recessed button under the map while the route is on (routes have no Forfeit button: this replaces it). It stops the timer at once, ends the route, and shows in red (`--route-missed`) the countries of one shortest route you never stepped into, with a key under the map; the result card lists the whole route by name.
+2. **Any country touching the board counts.** The board is the start, the destination and every country you've named. A guess is valid if it borders any of them, so you can build from both ends at once (`routeFrontier`). Typing uses the same `liveMatch` and `ClayInput` as every other mode, with the frontier (plus the board, so naming it is explained) as the scope. A country that touches nothing yet says so ("Brazil doesn't border your route yet.").
+3. **Dead ends are allowed.** A valid guess that leads nowhere still goes on the board and still counts as a move. Naming the start, the destination or a country already named is explained and costs nothing.
+4. **Finish:** the route is complete as soon as the named countries join the start to the destination (a breadth-first search inside the board, `routeComplete`). The result compares your moves with the shortest route and shows one shortest route.
+5. **Give Up:** a small, recessed button under the map while the route is on (routes have no Forfeit button: this replaces it). It stops the timer at once, ends the route, and shows in red (`--route-missed`) the countries of one shortest route you never named, with a key under the map; the result card lists the whole route by name.
 6. **Generate New Route:** on the result card, next to Share via QR (stacked on narrow phones). It draws a new random route and starts it immediately, without going back to the menu.
 
-On the map the start (violet) and destination (gold, pulsing until reached) are labeled and always highlighted, and each step fills in teal; a given-up route's missing countries are red. The map is framed around one shortest route.
+### Fog of war
+
+While a route is on, the map is one clay silhouette: every country takes the same fill, with a stroke of that same fill to close the seams, so there are no borders between countries (the clay filter still draws the coastlines). Dots for small countries are hidden too, since a dot would give one away. Only the start (violet), the destination (gold, pulsing until reached) and the countries you name (teal, with their borders) are drawn. The fog lifts when the round ends.
+
+Two hints, in order:
+
+1. **Reveal Adjacent:** outlines every country that borders your board right now. The outlines follow the board as it grows.
+2. **Reveal All:** lifts the fog: the standard map with every border.
+
+A guess named while its borders were outlined (or any guess after Reveal All) counts as hinted. The map is framed around one shortest route.
 
 ### Party Mode (pass and play)
 
@@ -129,17 +140,27 @@ The setup screen's **Name the: Countries / Capitals** switch applies to every li
 - **Data:** the `capital` field in `countries.json`, with curated fixes in `loadCountries.ts`: `CAPITAL_OVERRIDES` where a country has more than one capital the data leaves out (Bolivia: Sucre or La Paz; Eswatini: Mbabane or Lobamba; Sri Lanka: Sri Jayawardenepura Kotte or Colombo; Palestine: Ramallah or East Jerusalem) and `CAPITAL_ALIASES` for other spellings (Kiev, Peking, Nur-Sultan, Washington, Delhi…). South Africa accepts Pretoria, Cape Town or Bloemfontein.
 - **Typing a country instead:** "Sweden is a country. Name its capital."
 - **Out of scope:** "Brasília is the capital of Brazil. Brazil isn't in Europe."
-- **Hints:** stage 1 and 2 point at a country whose capital is missing; stage 3 lists the capitals' initials.
+- **Hints:** the capital is the answer here, so the first hint is **Country** (it names a country whose capital is missing) instead of Capital City; **First Letter** then spells out how that capital starts ("C _ _ _ _ _ _ _" for Canberra).
 - Measured: typing each of the 201 accepted capitals letter by letter in its own continent, none credits the wrong country and none is accepted before it's complete.
 
-## Daily Challenge
+## Daily Challenges
 
-`dailySeed.ts` hashes the date (`geotag:YYYY-MM-DD`, FNV-1a; the salt is `DAILY_SALT` and must not change once the game is live) into a Mulberry32 seed. The first draw picks the kind (a Pathfinding route on about half of days, otherwise a continent, always in Countries mode); the rest pick the route with the normal `pickRoute`, which only draws from sorted lists. So every browser on the same date gets the same puzzle, whatever its locale or the order the data arrived in.
+Two dailies, side by side on the setup screen, each with its own seed and its own records:
 
-- **One data set:** the daily is drawn from, and played on, the same bundled `countries.json` as every other round. Nothing is fetched, so every player of the same deployment gets the same data and the same puzzle.
+| | Daily Guessing | Daily Pathfinding |
+| --- | --- | --- |
+| Puzzle | Name every country in one continent (always Countries, even if Capitals is selected) | Connect two countries, 3–7 apart |
+| Seed | `guess:YYYY-MM-DD` | `route:YYYY-MM-DD` |
+| Shared as | `geotag - Daily Guessing 2026-10-29` | `geotag - Daily Pathfinding 2026-10-29` |
 
-- The date is the player's **local** date, like Wordle: the puzzle changes at local midnight.
-- The first finished attempt each day is the daily result. The card then shows it with a Share button, and **Play again** replays the same puzzle as an ordinary round (not tagged Daily, not shared as Daily).
+`dailySeed.ts` hashes `geotag:<seed>` (FNV-1a; the salt is `DAILY_SALT` and must not change once the game is live) into a Mulberry32 seed. Choices are drawn only from sorted lists, so every browser on the same date gets the same puzzles, whatever its locale or the order the data arrived in. Separate seeds mean a change to how routes are picked never changes the continent, and the other way round.
+
+- **One data set:** both dailies are drawn from, and played on, the same bundled `countries.json` as every other round. Nothing is fetched, so every player of the same deployment gets the same puzzles.
+- **Local midnight:** both unlock at the player's local midnight (`nextLocalMidnight`, built on `setHours(0, 0, 0, 0)`), not 24 hours after the last play. The setup screen rolls over to the new day on its own: a timer is set for the next midnight, and because timers stall while a device sleeps, the date is checked again whenever the page comes back into view. Pressing Play on a screen left open past midnight shows the new dailies instead of starting yesterday's.
+- **Which day a result belongs to:** the puzzle's date, taken when the daily starts. A daily started at 23:58 and finished at 00:03 is yesterday's result, so it can't lock you out of today's puzzle.
+- **Records:** the first finished attempt per daily and date goes into the `dailies` store (key `guessing:2026-10-29` or `pathfinding:2026-10-29`, written with `add`, so a second attempt can't replace it); the round is also saved to the profile as usual. **Play again** replays the same puzzle as an ordinary round (not tagged Daily, not shared as Daily).
+- **Stats per daily:** played, completed, current streak and best streak. A streak is consecutive calendar days completed; a give-up or a missed day ends it, and today still unplayed doesn't (it's open until midnight). Clear history clears these too.
+- **Upgrading:** version 3 of the database copies every daily already in the profile into the new store: Pathfinding rounds to Daily Pathfinding, the rest to Daily Guessing.
 
 ## Challenge links and QR sharing
 
@@ -164,7 +185,7 @@ geotag - Daily Pathfinding 2026-10-26
 🟩🟩🟨🟩🟩
 ```
 
-- **Pathfinding:** one square per move. 🟩 one country closer to the destination, 🟨 just as far, 🟥 further (steps back included).
+- **Pathfinding:** one square per guess, in order. 🟩 on a shortest route, 🟨 one country out of the way (a shortest route through it is one longer), 🟥 further off. Hints add 💡 n.
 - **List rounds:** up to 10 squares, each a tenth of the round's countries in the order named, by pace: 🟩 up to 6 s per country, 🟨 up to 15 s, 🟥 slower, ⬜ not reached. Hints add 💡 n; a forfeit adds 🏳️.
 - A round where suggestions showed adds "🔤 with suggestions".
 
@@ -211,20 +232,18 @@ The map only answers taps when that can't be used to cheat:
 
 | When | What's tappable | A tap shows |
 | --- | --- | --- |
-| During a round, fewer than 3 hints | Nothing | — |
-| During a list round, all 3 hints used | The round's countries | A missing country: only its initials ("P. N. G."), or its capital's initials in Capitals mode. A named one: its name (and the capital you gave). |
-| During a route | Nothing (routes have no hints) | — |
+| During any round | Nothing | — (hints are text, and the map never gives an answer away mid-round) |
 | After a round (won or forfeited) | Every country on the map | Its name, plus its capital(s) in Capitals mode |
 
 - **One listener:** `SvgMap` takes a single `onClick` on the `<svg>` and reads the tapped element's `data-code`, instead of ~240 handlers. Clickable shapes get `data-clickable` (pointer cursor), and small countries drawn as dots get an invisible tap target three times the dot's size.
 - **Phones:** the tooltip stays up after the finger lifts. It closes on the next tap elsewhere (or on the sea), on Escape, or when the round changes. Tapping the map doesn't take focus from the answer field, so the keyboard stays up.
 - **60 fps:** the tooltip springs open on transform and opacity only. The tapped country's outline is drawn on its own layer outside the map's SVG filters, so nothing re-runs a filter.
-- The stage-3 hint and a note under the map say when the map is tappable. Initials are now written with spaces everywhere ("B. F.").
-- Map taps are pointer-only. Keyboard and screen-reader players get the same information from the stage-3 hint list and the result screen's lists.
+- A note under the map says when it's tappable.
+- Map taps are pointer-only. Keyboard and screen-reader players get the same information from the result screen's lists.
 
 ## Recall heatmap
 
-Each list round now saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint pointed at it (its borders, its outline, or the initials), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
+Each list round now saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint was about it (Capital City or First Letter), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
 
 - Bands: under 4 s (green), 4–10 s, 10–20 s, over 20 s (red), blank for never named. A hinted answer counts as at least 30 s, so heavily hinted countries go red. Picked answers are recognition, not recall, and don't count. Countries and capitals are mapped separately.
 - Green to red as asked, with lightness falling at every step, so the order still reads for red-green color-blind players and in grayscale (checked with the dataviz palette validator; it only objects that the ramp isn't one hue, which green to red can't be).
@@ -252,13 +271,14 @@ Each finished or forfeited round is saved once, after the Timer reports the fina
 - **Recent rounds:** the latest 20, tagged Won/Forfeited, Daily, Best and Suggestions. Capitals rounds keep their own personal bests ("Oceania capitals").
 - **Filter:** all rounds, without suggestions, or with suggestions.
 
-## Hints (3 per round, each builds on the last)
+## Hints (2 per round, given in order)
 
-1. **Neighbours:** names the land neighbours of one missing country. The country is chosen to give away the fewest *other* answers: neighbours already named, or outside the round, don't count. If no missing country has a land border, it says the country is an island nation.
-2. **Outline:** that same country pulses on the map (a pulsing ring for dot-marked microstates). If it was already found, another missing country pulses instead.
-3. **Initials:** initials of every country still missing ("B.F." for Burkina Faso). The list shrinks as you name them.
+List rounds (continents, empires, World) get two text hints; nothing is marked on the map.
 
-Naming a hinted country is confirmed in the panel and stops its pulse. The result line reports hints used.
+1. **Capital City:** the capital of one missing country, picked at random ("One missing country has the capital Nairobi."). Countries with no capital on record are skipped.
+2. **First Letter:** the first letter and a blank per letter ("K _ _ _ _"), spaces and hyphens kept. It's about the same country as Capital City while that one is still missing, so the two build on each other; once it's found, another missing country at random. Screen readers hear "starts with K, 5 letters" instead of the underscores.
+
+Each hint says "Found: Kenya." once its country is named. The result line reports hints used. In Capitals mode the first hint is **Country** instead (see Capitals mode). Pathfinding has its own two map hints (see Fog of war).
 
 ## Map
 
@@ -282,10 +302,10 @@ With `liveMatch`, 191 of 195 correctly spelled names land on their last keystrok
 ## Layout
 
 - **Splash:** no card: the logo, PLAY, tagline and loader float centered on the full-screen peach-lavender gradient. The tagline is in full ink and pulses only to 75% opacity, so it stays above 4.5:1 contrast on the bare gradient at its faintest.
-- **Header:** the logo on the left; **Profile & Stats** and the vibration toggle on the right, on every screen. Profile & Stats is an icon on phones and a labelled pill from 600px. It isn't shown during a round: the profile's heatmap would show the map before the hints allow it.
+- **Header:** the logo on the left; **Profile & Stats** and the vibration toggle on the right, on every screen. Profile & Stats is an icon on phones and a labelled pill from 600px. It isn't shown during a round: the profile's heatmap would give answers away.
 - **Phones and tablets (under 1024px):** one column, up to 760px wide.
 - **Desktop (1024px and up):** up to 1200px wide, in two columns, set in CSS by the screen (`.game-shell[data-screen="setup" | "round"]`, as `.game`'s grid items; no markup moves):
-  - **Setup:** the Daily Challenge on the left (it stays in view), the mode picker on the right, where the tile grids widen to fill it.
+  - **Setup:** the two Daily Challenges stacked on the left (they stay in view on screens at least 860px tall), the mode picker on the right, where the tile grids widen to fill it. On tablets (720–1023px) the two dailies sit side by side.
   - **Rounds:** the answer field, hints, result and lists on the left; the map on the right, staying in view as the left column scrolls (its height capped to fit the screen). Pass and play's hand-over card is centered across both.
 
 ## Clay theme
@@ -323,18 +343,18 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 - The profile lives in one browser. It doesn't sync between devices, and clearing site data erases it. Safari deletes script-written storage, IndexedDB included, for sites not visited in 7 days, unless the site is added to the Home Screen.
 - "Average time per mode" mixes round sizes: a Continents average blends Oceania (14) and Africa (54). Seconds per country and personal bests are the comparable numbers.
 - Suggestions don't narrow the answers down, but they still jog your memory ("b" lists every B country), so assisted times aren't comparable with unassisted ones. Use the filter.
-- The Daily Challenge is identical for everyone running the same deployment: it uses the bundled `countries.json`, so refreshing it (`npm run snapshot`) and redeploying can change future dailies. Do that between days, not mid-day.
+- The dailies are identical for everyone running the same deployment: they use the bundled `countries.json`, so refreshing it (`npm run snapshot`) and redeploying can change future dailies. Do that between days, not mid-day.
+- Daily Guessing draws from the 5 continents, so there are only 5 distinct puzzles and the same one can come up two days running. Widening the pool (empires, World) would change every future Daily Guessing.
 - "Same for everyone" means the same local date. Players east of you get the next puzzle first and can share it before you've played.
 - Disputed capitals follow the data: Israel's is Jerusalem, and Palestine's accepts Ramallah or East Jerusalem.
 - The brand name lives in one constant, `BRAND_NAME` in `src/utils/share.ts`: the page `<title>`, the header and the share text all read it. The IndexedDB database keeps its original internal name (`country-recall`) so existing saved profiles aren't lost; players never see it.
 - Pathfinding treats each country as one place, so routes can cross water inside a country: Thailand → Malaysia → Indonesia → Papua New Guinea is legal because Malaysia borders Thailand on the mainland and Indonesia on Borneo. Spain–Morocco counts through Ceuta and Melilla.
 - The pathfinding map is framed around one shortest route; a long detour can wander past its edges.
-- Pathfinding has no hints: all three hint stages are built for "name every country" rounds.
+- The fog hides borders, not coastlines: an island country (the UK, Sri Lanka) is still recognizable by its shape.
 - The empire lists are the game's answer key, taken as given. Worth a historical review: see "Empire data to review" below.
 - The Mughal round has only 4 countries, so it lasts seconds.
-- Stage 1 still reveals unnamed neighbours when every candidate has some (early in a round, usually 1–2 names).
-- Neighbour lists only include sovereign states: Morocco's hint omits Western Sahara, Brazil's omits French Guiana.
-- Stage 2 is visual only. Screen-reader users get its text but not the outline.
+- Borders only link sovereign states: Morocco–Western Sahara and Brazil–French Guiana don't count in Pathfinding.
+- Reveal Adjacent and Reveal All are visual. Screen-reader users get their text, but not the outlines.
 - A typo'd answer needs a 0.7 s pause (or Enter) before the next country. If the player types straight on, the two words run together in the field.
 - The 700 ms pause is tuned by feel, not measured with players.
 - Continents follow the dataset's regions: "Americas" is one round (35 countries), and borderline cases follow the data (Türkiye, Armenia, Georgia and Azerbaijan are Asia; Russia and Cyprus are Europe).
