@@ -3,7 +3,7 @@
  * and a row of colored squares.
  */
 
-import { bfsDistances, type BorderGraph, type RoutePuzzle } from "./pathfinding";
+import { detourTable, routeVerdict, type BorderGraph, type RoutePuzzle } from "./pathfinding";
 
 /** The product name: page title, header and share text all use this. */
 export const BRAND_NAME = "geotag";
@@ -20,15 +20,9 @@ export const PACE_OK_SECONDS = 15;
  * or the wrong side). A perfect route is all green, one square per country in between.
  */
 export function routeGrid(graph: BorderGraph, puzzle: RoutePuzzle, guesses: readonly string[]): string {
-  const fromStart = bfsDistances(graph, puzzle.start);
-  const fromEnd = bfsDistances(graph, puzzle.end);
-  const direct = fromStart.get(puzzle.end) ?? Infinity;
-  return guesses
-    .map((code) => {
-      const detour = (fromStart.get(code) ?? Infinity) + (fromEnd.get(code) ?? Infinity) - direct;
-      return detour === 0 ? SQUARES.good : detour === 1 ? SQUARES.ok : SQUARES.bad;
-    })
-    .join("");
+  const detour = detourTable(graph, puzzle);
+  const square = { on: SQUARES.good, near: SQUARES.ok, off: SQUARES.bad } as const;
+  return guesses.map((code) => square[routeVerdict(detour(code))]).join("");
 }
 
 /**
@@ -68,13 +62,15 @@ export type ShareInput = {
   title: string;
   /** YYYY-MM-DD for the Daily Challenge, null otherwise. */
   daily: string | null;
+  /** YYYY-MM-DD of a Daily Archive replay (shared as that daily, marked as a replay). */
+  archive?: string | null;
   won: boolean;
   timeMs: number;
   grid: string;
   /** The autocomplete list showed answers during the round. */
   assisted: boolean;
 } & (
-  | { kind: "route"; moves: number; par: number; hints?: number }
+  | { kind: "route"; moves: number; par: number; hints?: number; limit?: number | null; outOfGuesses?: boolean }
   | { kind: "list"; emoji: string; named: number; total: number; hints: number; subject?: string }
 );
 
@@ -84,13 +80,19 @@ export type ShareInput = {
  *   🟩🟩🟨🟩🟩
  */
 export function buildShareText(input: ShareInput): string {
-  const heading = `${BRAND_NAME} - ${input.daily ? `Daily ${input.title} ${input.daily}` : input.title}`;
+  const heading = `${BRAND_NAME} - ${
+    input.daily ? `Daily ${input.title} ${input.daily}` : input.archive ? `Daily ${input.title} ${input.archive} (archive)` : input.title
+  }`;
   const time = `⏱️ ${formatShareTime(input.timeMs)}`;
   let stats: string;
   if (input.kind === "route") {
-    const moves = `${input.moves} ${input.moves === 1 ? "move" : "moves"}`;
+    const moves = input.limit ? `${input.moves}/${input.limit} moves` : `${input.moves} ${input.moves === 1 ? "move" : "moves"}`;
     const hints = input.hints ? ` 💡 ${input.hints}` : "";
-    stats = input.won ? `🗺️ ${moves} (shortest ${input.par}) ${time}${hints}` : `🗺️ 🏳️ gave up after ${moves} ${time}${hints}`;
+    stats = input.won
+      ? `🗺️ ${moves} (shortest ${input.par}) ${time}${hints}`
+      : input.outOfGuesses
+        ? `🗺️ ❌ out of guesses (${moves}) ${time}${hints}`
+        : `🗺️ 🏳️ gave up after ${moves} ${time}${hints}`;
   } else {
     const hints = input.hints > 0 ? ` 💡 ${input.hints}` : "";
     const subject = input.subject ? `${input.subject} ` : "";

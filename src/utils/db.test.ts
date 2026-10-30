@@ -6,6 +6,7 @@ import {
   dailyFromRound,
   dailyId,
   dailyStats,
+  countsAsPlayed,
   getSetting,
   listDailies,
   listPartyResults,
@@ -247,7 +248,19 @@ describe("dailies (one store, a record per kind and date)", () => {
 });
 
 describe("dailyStats", () => {
-  const rec = (date: string, result: DailyRecord["result"] = "won") => ({ date, result }) as DailyRecord;
+  /** A Daily Guessing result; a give-up names one country unless `correct` says otherwise. */
+  const rec = (date: string, result: DailyRecord["result"] = "won", correct = 1) =>
+    ({ kind: "guessing", date, result, correct, moves: null }) as DailyRecord;
+
+  it("a give-up with nothing named (or no move made) isn't a day played", () => {
+    expect(countsAsPlayed(rec("2026-10-01", "forfeited", 0))).toBe(false);
+    expect(countsAsPlayed(rec("2026-10-01", "forfeited", 1))).toBe(true);
+    expect(countsAsPlayed({ kind: "pathfinding", result: "forfeited", correct: 0, moves: 0 })).toBe(false);
+    expect(countsAsPlayed({ kind: "pathfinding", result: "forfeited", correct: 1, moves: 1 })).toBe(true);
+    expect(countsAsPlayed({ kind: "pathfinding", result: "won", correct: 0, moves: 0 })).toBe(true);
+    const records = [rec("2026-10-01"), rec("2026-10-02", "forfeited", 0), rec("2026-10-03")];
+    expect(dailyStats(records, "2026-10-03")).toEqual({ played: 2, won: 2, streak: 1, bestStreak: 1 });
+  });
 
   it("counts days played and completed", () => {
     const stats = dailyStats([rec("2026-10-01"), rec("2026-10-02", "forfeited"), rec("2026-10-05")], "2026-10-05");

@@ -22,6 +22,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#f3efff", // the page's lilac, as in the manifest
+  // Android Chrome: let the on-screen keyboard shrink the layout (and 100dvh) instead of
+  // sliding over it. iPhone ignores this; src/utils/viewport.ts covers it there.
+  interactiveWidget: "resizes-content",
 };
 
 /**

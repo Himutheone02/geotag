@@ -4,10 +4,19 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import CountryGuesser, { initialSession, sessionReducer, TYPO_ACCEPT_DELAY_MS, type Guess } from "./CountryGuesser";
+import CountryGuesser, {
+  DAILY_GUESS_MARGIN,
+  initialSession,
+  sessionReducer,
+  shuffled,
+  TYPO_ACCEPT_DELAY_MS,
+  type Guess,
+} from "./CountryGuesser";
+import { flagSrc, loadFlags } from "@/components/game/Flag";
+import { FLAGS } from "@/data/flags";
 import { letterCount, letterPattern } from "@/components/game/HintPanel";
-import { buildBorderGraph, pickRoute, routeFrontier } from "@/utils/pathfinding";
-import { dailyGuessing, dailyPathfinding, dateKey } from "@/utils/dailySeed";
+import { buildBorderGraph, detourOf, pickRoute, routeComplete, routeFrontier, routeVerdict } from "@/utils/pathfinding";
+import { ARCHIVE_START, archiveDates, dailyGuessing, dailyPathfinding, dateKey } from "@/utils/dailySeed";
 import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
 import { SPLASH_EXIT_MS } from "@/components/game/SplashScreen";
 import { CONTINENTS, GUESSING_POOL, LOGO_SRC } from "./CountryGuesser";
@@ -54,7 +63,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} pathfindingIntro={false} />));
 });
 
 afterEach(() => {
@@ -317,12 +326,31 @@ describe("Historical Mode", () => {
     expect($(".mode-option[aria-pressed=true]")!.textContent).toBe("Empires");
     expect($("#setup-heading")!.textContent).toBe("Pick an empire");
     expect(empireTiles()).toEqual([
-      "Roman Empire27 BC – AD 47643 countries",
+      "Roman Empire27 BC – AD 47645 countries",
       "Mughal Empire1526 – 18574 countries",
-      "Ottoman Empire1299 – 192238 countries",
-      "Soviet Union1922 – 199115 countries",
-      "British Empire1583 – 199766 countries",
+      "Ottoman Empire1299 – 192237 countries",
+      "Soviet Union1922 – 199117 countries",
+      "British Empire1583 – 199771 countries",
     ]);
+  });
+
+  it("shows the inclusion rule on the Empires tab, and only there", () => {
+    clickButton("Empires");
+    expect($(".rule-note")!.textContent).toBe(
+      "The ruleAny part of today's country was directly governed by the empire during its era. Annexed or run by its own officials counts. Vassals, protected states with their own rulers, and wartime occupations don't.",
+    );
+    clickButton("Continents");
+    expect($(".rule-note")).toBeNull();
+  });
+
+  it("says which part of a country was in the empire, on its chip", () => {
+    clickButton("Empires");
+    clickButton("British Empire");
+    typeKeys("China");
+    expect($(".chip-note")!.textContent).toBe("Hong Kong (1841–1997) and Weihaiwei (1898–1930)");
+    clickButton("Forfeit");
+    const missedSpain = [...container.querySelectorAll(".missed-list .chip")].find((c) => c.textContent?.startsWith("Spain"))!;
+    expect(missedSpain.querySelector(".chip-note")!.textContent).toBe("Menorca, 1708–1802, with gaps");
   });
 
   it("an empire round targets only that empire's countries", () => {
@@ -345,7 +373,7 @@ describe("Historical Mode", () => {
     expect($('section[aria-labelledby="named-heading"]')!.getAttribute("data-theme")).toBe("Soviet");
     expect($(".chip")!.hasAttribute("data-region")).toBe(false);
     expect($(".world-map")!.getAttribute("data-theme")).toBe("Soviet");
-    expect($(".world-map")!.getAttribute("aria-label")).toBe("Map of Soviet Union: 1 of 15 countries named");
+    expect($(".world-map")!.getAttribute("aria-label")).toBe("Map of Soviet Union: 1 of 17 countries named");
   });
 
   it("winning an empire round reports it, and setup reopens on the Empires tab", () => {
@@ -432,6 +460,27 @@ describe("Pathfinding", () => {
     expect(feedback()).toMatch(/^Recognized: /);
     expect(moves()).toBe("1 move");
     expect(routeChips()).toContain(name(deadEnd));
+  });
+
+  it("colors each guess at once: on a shortest route, one off, or off course, in words too", () => {
+    clickButton("Start");
+    step(puzzle.shortest[1]);
+    const chip = (code: string) => [...container.querySelectorAll(".route-list .chip")].find((c) => c.textContent?.includes(name(code)))!;
+    expect(chip(puzzle.shortest[1]).getAttribute("data-verdict")).toBe("on");
+    expect(chip(puzzle.shortest[1]).querySelector(".chip-verdict")!.textContent).toBe("✓");
+    expect(chip(puzzle.shortest[1]).querySelector(".visually-hidden")!.textContent).toBe(", on a shortest route");
+    expect(feedback()).toBe(`Recognized: ${name(puzzle.shortest[1])}: on a shortest route.`);
+    expect($(".feedback--ok")).not.toBeNull();
+    // A dead end off the start: told straight away, as a warning.
+    const off = [...graph.get(puzzle.start)!].find((c) => routeVerdict(detourOf(graph, puzzle, c)) === "off")!;
+    step(off);
+    expect(chip(off).getAttribute("data-verdict")).toBe("off");
+    expect(chip(off).querySelector(".chip-verdict")!.textContent).toBe("✕");
+    expect(feedback()).toBe(`Recognized: ${name(off)}: off course: a route through it is 2 or more countries longer.`);
+    expect($(".feedback--warn")).not.toBeNull();
+    // The ends keep their own colors; the key explains the three.
+    expect($(".route-list .chip--start")!.hasAttribute("data-verdict")).toBe(false);
+    expect($(".verdict-key")!.textContent).toBe("✓on a shortest route≈one country out of the way✕off course");
   });
 
   it("rejects a country that borders nothing named yet", () => {
@@ -784,7 +833,7 @@ describe("Daily Challenges", () => {
     const [y, m, d] = date.split("-").map(Number);
     vi.setSystemTime(new Date(y, m - 1, d, hour));
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} pathfindingIntro={false} />));
   }
   const card = (kind: "guessing" | "pathfinding") => $(`.daily-card[data-kind="${kind}"]`)!;
   async function play(kind: "guessing" | "pathfinding") {
@@ -857,27 +906,143 @@ describe("Daily Challenges", () => {
     }
   });
 
+  /** Names a country as a player would (Enter if the name starts another country's). */
+  const name = (country: string) => {
+    typeKeys(country);
+    if ($<HTMLInputElement>("input")?.value) pressEnter();
+  };
+  /** One country of a Daily Guessing round. */
+  const firstOf = (round: string) => {
+    const empire = empires.find((e) => e.key === round);
+    if (empire) return byCode.get(empire.codes[0])!.name;
+    return round === "World" ? countries[0].name : inRegion(round)[0].name;
+  };
+
   it("shares a spoiler-free Daily Pathfinding result", async () => {
     const date = "2026-10-29";
+    const { puzzle } = dailyPathfinding(date, graph)!;
     openOn(date);
     await play("pathfinding");
     wait(72_000);
+    name(nameOf([...graph.get(puzzle.start)!].sort()[0])); // one move: the daily counts
     clickButton("Give Up");
     const text = $(".share-preview")!.textContent!;
-    expect(text.split("\n")).toEqual([`geotag - Daily Pathfinding ${date}`, "🗺️ 🏳️ gave up after 0 moves ⏱️ 01:12"]);
+    const [heading, stats, grid] = text.split("\n");
+    expect(heading).toBe(`geotag - Daily Pathfinding ${date}`);
+    expect(stats).toBe(`🗺️ 🏳️ gave up after 1/${puzzle.par + DAILY_GUESS_MARGIN} moves ⏱️ 01:12`); // the daily's cap
+    expect(grid).toMatch(/^(🟩|🟨|🟥)$/u);
     for (const c of countries) expect(text).not.toContain(c.name);
   });
 
   it("shares Daily Guessing under its own title, with the round on the stats line", async () => {
     const date = "2026-10-29";
-    const continent = roundInfo(dailyGuessing(date, GUESSING_POOL).round).title;
+    const { round } = dailyGuessing(date, GUESSING_POOL);
     openOn(date);
     await play("guessing");
     wait(5_000);
+    name(firstOf(round));
     clickButton("Forfeit");
     const [heading, stats] = $(".share-preview")!.textContent!.split("\n");
     expect(heading).toBe(`geotag - Daily Guessing ${date}`);
-    expect(stats).toMatch(new RegExp(`^\\S+ ${continent} 0/\\d+ 🏳️ ⏱️ 00:05$`));
+    expect(stats).toMatch(new RegExp(`^\\S+ ${roundInfo(round).title} 1/\\d+ 🏳️ ⏱️ 00:05$`));
+  });
+
+  /** Names `n` countries that border the route but don't complete it: dead ends on purpose. */
+  function spendGuesses(puzzle: NonNullable<ReturnType<typeof dailyPathfinding>>["puzzle"], n: number, named: string[] = []) {
+    for (let i = 0; i < n; i++) {
+      const next = [...routeFrontier(graph, puzzle, named)].sort().find((c) => !routeComplete(graph, puzzle, [...named, c]))!;
+      name(nameOf(next));
+      named.push(next);
+    }
+  }
+
+  it("Daily Pathfinding has a guess cap: the shortest route plus 4, then Game Over", async () => {
+    const date = "2026-10-29";
+    const { puzzle } = dailyPathfinding(date, graph)!;
+    const limit = puzzle.par + DAILY_GUESS_MARGIN;
+    openOn(date);
+    await play("pathfinding");
+    expect($(".counter")!.textContent).toBe(`0/ ${limit} moves`);
+    expect($(".route-limit")!.textContent).toBe(`${limit} of ${limit} guesses left (daily rules: the shortest route plus 4).`);
+    const named: string[] = [];
+    spendGuesses(puzzle, limit - 1, named);
+    expect($(".route-limit")!.textContent).toBe("Last guess: make it join the route.");
+    expect($(".counter")!.hasAttribute("data-low")).toBe(true);
+    spendGuesses(puzzle, 1, named); // not the one that joins it
+    expect($("#result-heading")!.textContent).toBe("Out of guesses");
+    expect($(".card-lead")!.textContent).toMatch(new RegExp(`^You used all ${limit} guesses without joining .+ to .+, at \\d\\d:\\d\\d\\. The shortest route has ${puzzle.par} countries in between\\.$`));
+    expect($('[aria-label="One shortest route"]')).not.toBeNull(); // shown, as after a Give Up
+    expect($(".share-preview")!.textContent!.split("\n")[1]).toMatch(new RegExp(`^🗺️ ❌ out of guesses \\(${limit}/${limit} moves\\) ⏱️`));
+  });
+
+  it("random routes have no cap", async () => {
+    openOn("2026-10-29");
+    clickButton("Pathfinding");
+    clickButton("Start");
+    expect($(".counter")!.textContent).toBe("0moves");
+    expect($(".route-limit")).toBeNull();
+  });
+
+  it("the archive lists every past date's two puzzles, newest first, and says when the rules changed", async () => {
+    const today = "2026-11-02";
+    openOn(today);
+    await act(async () => {});
+    clickButton("Past puzzles");
+    await act(async () => {});
+    const dates = archiveDates(today);
+    expect(dates[0]).toBe("2026-11-01");
+    expect(dates.at(-1)).toBe(ARCHIVE_START);
+    const days = [...container.querySelectorAll(".archive-day")];
+    expect(days).toHaveLength(dates.length);
+    expect(days[0].querySelector(".archive-day__date")!.textContent).toMatch(/November 1/);
+    const first = days[0].querySelectorAll(".archive-puzzle");
+    const { puzzle } = dailyPathfinding("2026-11-01", graph)!;
+    expect(first[0].textContent).toBe(`Guessing${roundInfo(dailyGuessing("2026-11-01", GUESSING_POOL).round).title}`);
+    expect(first[1].textContent).toBe(`Pathfinding${nameOf(puzzle.start)} → ${nameOf(puzzle.end)}`);
+    expect($(".archive-note")!.textContent).toMatch(/^Before October 30, the dailies were dealt by earlier rules/);
+    expect([...container.querySelectorAll(".archive-month__title")].map((h) => h.textContent)).toEqual(["November 2026", "October 2026"]);
+  });
+
+  it("an archive puzzle plays as that day's puzzle, marked Archive, and shares as a replay", async () => {
+    const today = "2026-11-02";
+    const past = "2026-10-31";
+    openOn(today);
+    await act(async () => {});
+    clickButton("Past puzzles");
+    await act(async () => {});
+    const day = [...container.querySelectorAll(".archive-day")].find((d) => d.textContent!.includes("October 31"))!;
+    act(() => (day.querySelector('.archive-puzzle[data-kind="guessing"]') as HTMLButtonElement).click());
+    const { round } = dailyGuessing(past, GUESSING_POOL);
+    expect($("h1")!.textContent).toBe(`${roundInfo(round).title}Archive`);
+    expect($(".archive-dialog")).toBeNull();
+    name(firstOf(round));
+    clickButton("Forfeit");
+    expect($(".share-preview")!.textContent!.split("\n")[0]).toBe(`geotag - Daily Guessing ${past} (archive)`);
+    expect($(".daily-unclaimed")).toBeNull();
+  });
+
+  it("an archive Daily Pathfinding keeps the daily's guess cap", async () => {
+    openOn("2026-11-02");
+    await act(async () => {});
+    clickButton("Past puzzles");
+    await act(async () => {});
+    const day = [...container.querySelectorAll(".archive-day")].find((d) => d.textContent!.includes("October 31"))!;
+    act(() => (day.querySelector('.archive-puzzle[data-kind="pathfinding"]') as HTMLButtonElement).click());
+    const { puzzle } = dailyPathfinding("2026-10-31", graph)!;
+    expect($("h1")!.textContent).toBe(`${nameOf(puzzle.start)} to ${nameOf(puzzle.end)}Archive`);
+    expect($(".counter")!.textContent).toBe(`0/ ${puzzle.par + DAILY_GUESS_MARGIN} moves`);
+  });
+
+  it("giving up before naming anything doesn't use up the daily", async () => {
+    const date = "2026-10-29";
+    openOn(date);
+    await play("pathfinding");
+    clickButton("Give Up");
+    expect($(".daily-unclaimed")!.textContent).toBe(
+      "This didn't count as today's daily: a daily counts once you've made at least one move. It's still open on the setup screen.",
+    );
+    expect($(".share-preview")!.textContent!.split("\n")[0]).toBe("geotag - Pathfinding"); // not shared as the daily
+    clickButton("Choose another round");
   });
 
   it("rolls over to the new day's dailies at local midnight, with the page left open", async () => {
@@ -920,7 +1085,7 @@ describe("challenge links (?route=)", () => {
     search.params = new URLSearchParams(query);
     window.history.replaceState(null, "", `/?${query}`);
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} pathfindingIntro={false} />));
   }
   afterEach(() => {
     search.params = new URLSearchParams();
@@ -1183,6 +1348,18 @@ describe("map taps", () => {
     vi.restoreAllMocks();
   });
 
+  it("after an empire round, a country only partly in the empire says which part", async () => {
+    clickButton("Empires");
+    clickButton("British Empire");
+    await loadMap();
+    clickButton("Forfeit");
+    tapMap("ESP");
+    expect(tooltip()).toBe("SpainMenorca, 1708–1802, with gaps");
+    expect(announced()).toBe("Spain. Menorca, 1708–1802, with gaps.");
+    tapMap("GBR");
+    expect(tooltip()).toBe("United Kingdom"); // the whole country: no note
+  });
+
   it("a new round starts with the tooltip closed", async () => {
     clickButton("Oceania");
     await loadMap();
@@ -1200,7 +1377,7 @@ describe("boot-up splash and logo", () => {
     act(() => root.unmount());
     root = createRoot(container);
     act(() =>
-      root.render(<CountryGuesser countries={countries} empires={empires} {...props} />),
+      root.render(<CountryGuesser countries={countries} empires={empires} pathfindingIntro={false} {...props} />),
     );
   }
   const shell = () => $(".game-shell")!;
@@ -1234,7 +1411,7 @@ describe("boot-up splash and logo", () => {
     act(() => root.unmount());
     search.params = new URLSearchParams("route=PRT-POL");
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} pathfindingIntro={false} />));
     expect($(".splash")).toBeNull();
     expect(shell().hasAttribute("inert")).toBe(false);
     expect($("h1")!.textContent).toBe("Portugal to Poland");
@@ -1268,7 +1445,7 @@ describe("header: Profile & Stats", () => {
     expect(profileButton()!.textContent).toBe("Profile & Stats");
     expect(profileButton()!.closest(".brand-row")).not.toBeNull();
     const modes = [...container.querySelectorAll(".mode-switch button")].map((b) => b.textContent);
-    expect(modes).toEqual(["Continents", "Empires", "World", "Pathfinding"]);
+    expect(modes).toEqual(["Continents", "Empires", "World", "Flags", "Weak Spots", "Pathfinding"]);
   });
 
   it("opens the profile in a modal dialog, and closes it", () => {
@@ -1359,9 +1536,15 @@ describe("Party Mode (pass-and-play)", () => {
 
   it("keeps the shortest route hidden during the party, until someone asks to see it", () => {
     finish(5);
+    expect(container.querySelectorAll(".route-list .chip[data-verdict]").length).toBe(puzzle.par); // player 1, before the party
     clickButton("Next Player");
     clickButton("Start");
+    typeKeys(name(puzzle.shortest[1]));
+    if ($<HTMLInputElement>("input")?.value) pressEnter();
+    expect($(".route-list .chip[data-verdict]")).not.toBeNull(); // the player's own feedback, while playing
     clickButton("Give Up");
+    expect($(".route-list .chip[data-verdict]")).toBeNull(); // the colors would give the route away
+    expect($(".verdict-key")).toBeNull();
     expect($('[aria-label="One shortest route"]')).toBeNull();
     expect(container.querySelector(".map-named--missed, .map-marker--missed, .map-note--missed")).toBeNull();
     clickButton("Show the shortest route");
@@ -1456,7 +1639,7 @@ describe("haptics", () => {
       (query: string) => ({ matches: coarse && query === "(pointer: coarse)", media: query }) as MediaQueryList,
     );
     root = createRoot(container);
-    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={splash} />));
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={splash} pathfindingIntro={false} />));
   }
   afterEach(() => {
     delete (navigator as { vibrate?: unknown }).vibrate;
@@ -1554,6 +1737,112 @@ describe("timer isolation", () => {
   });
 });
 
+describe("Vexillology Mode (flags)", () => {
+  const europe = inRegion("Europe").map((c) => c.code);
+  // With Math.random() pinned to 0, the round shows Europe's flags in this order.
+  const order = shuffled(europe, () => 0);
+  const name = (code: string) => byCode.get(code)!.name;
+  const flagShown = () => $<HTMLImageElement>(".flag-stage__flag")?.getAttribute("src");
+  const say = (country: string) => {
+    typeKeys(country);
+    wait(TYPO_ACCEPT_DELAY_MS + 50);
+    if ($<HTMLInputElement>("input")?.value) pressEnter();
+  };
+  const clear = () =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), "");
+      input().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  async function flagsLoaded() {
+    await act(async () => {
+      await loadFlags();
+    });
+    await act(async () => {});
+  }
+
+  beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("offers each region's flags on the Flags tab, always as country names", () => {
+    clickButton("Flags");
+    expect($("#setup-heading")!.textContent).toBe("Name the flag");
+    expect([...container.querySelectorAll(".continent-button")].map((b) => b.textContent)).toEqual([
+      "Africa54 flags",
+      "Americas35 flags",
+      "Asia47 flags",
+      "Europe45 flags",
+      "Oceania14 flags",
+      "World195 flags",
+    ]);
+    expect($(".answer-switch")).toBeNull(); // no Capitals here
+  });
+
+  it("shows one flag at a time, big, and takes only that flag's country", async () => {
+    clickButton("Flags");
+    clickButton("Europe45");
+    await flagsLoaded();
+    expect($("h1")!.textContent).toBe("Europe flags");
+    expect($(".flag-stage__flag")!.getAttribute("alt")).toBe("The flag to name"); // never the answer
+    expect(flagShown()).toBe(flagSrc(FLAGS, order[0]));
+    expect($(".flag-stage__count")!.textContent).toBe("Flag 1 of 45");
+    say(name(order[1])); // a European country, but not this flag's
+    expect(feedback()).toBe(`Not ${name(order[1])}. Try again, or skip this flag.`);
+    expect(counter()).toBe("0 / 45");
+    clear();
+    say(name(order[0]));
+    expect(counter()).toBe("1 / 45");
+    expect(flagShown()).toBe(flagSrc(FLAGS, order[1])); // the next flag
+    expect($(".flag-stage__count")!.textContent).toBe("Flag 2 of 45");
+    expect(chipNames()).toEqual([name(order[0])]);
+    expect($(".chip--flag .chip-flag")!.getAttribute("src")).toBe(flagSrc(FLAGS, order[0]));
+    await loadMap();
+    expect($(`.map-named[data-code="${order[0]}"]`)).not.toBeNull(); // and it fills in on the map
+  });
+
+  it("Skip sends the flag on screen to the back of the line", async () => {
+    clickButton("Flags");
+    clickButton("Europe45");
+    await flagsLoaded();
+    clickButton("Skip");
+    expect(flagShown()).toBe(flagSrc(FLAGS, order[1]));
+    say(name(order[1]));
+    expect(flagShown()).toBe(flagSrc(FLAGS, order[2]));
+    expect($(".flag-stage__count")!.textContent).toBe("Flag 2 of 45");
+  });
+
+  it("gives each flag its own two hints, about that flag", async () => {
+    clickButton("Flags");
+    clickButton("Europe45");
+    await flagsLoaded();
+    const first = byCode.get(order[0])!;
+    clickButton("Capital City");
+    expect(hints()[0]).toBe(`${first.capitals.length > 1 ? "Its capitals are" : "Its capital is"} ${first.capitals.join(", ")}.`);
+    clickButton("First Letter");
+    expect(hints()[1]).toContain(`Its name: ${letterPattern(first.name)}`);
+    expect(hintButton()!.textContent).toBe("No hints left (2/2)");
+    say(first.name);
+    expect(hintButton()!.textContent).toBe("Capital City (0/2)"); // a new flag, two new hints
+    expect(hints()).toEqual([]);
+    clickButton("Capital City");
+    clickButton("Forfeit");
+    expect($(".card-lead")!.textContent).toBe("You forfeited at 00:00, with 3 hints. Here are the 44 you missed.");
+  });
+
+  it("lists missed flags with their flags, and plays countries even with Capitals selected", async () => {
+    clickButton("Capitals");
+    clickButton("Flags");
+    clickButton("Oceania14");
+    await flagsLoaded();
+    expect(input().placeholder).toBe("Type a country");
+    clickButton("Forfeit");
+    expect(container.querySelectorAll(".missed-list .chip--flag .chip-flag")).toHaveLength(14);
+    expect($(".missed-list .chip--flag")!.textContent).toBe(name(inRegion("Oceania")[0].code));
+    expect($(".share-preview")!.textContent!.split("\n")[0]).toBe("geotag - Oceania flags");
+    clickButton("Play Oceania flags again");
+    expect($(".flag-stage__count")!.textContent).toBe("Flag 1 of 14");
+  });
+});
+
 describe("sessionReducer", () => {
   const kenya = countries.find((c) => c.code === "KEN")!;
   const ghana = countries.find((c) => c.code === "GHA")!;
@@ -1606,6 +1895,50 @@ describe("sessionReducer", () => {
     s = sessionReducer(s, { type: "step", guess: g("FRA"), complete: true });
     expect(s.status).toBe("won");
     expect(s.moves).toBe(4);
+  });
+
+  it("flags: only the flag on screen counts, Skip rotates the line, and each flag gets two hints", () => {
+    const g = (code: string): Guess => ({ country: byCode.get(code)!, typed: code, distance: 0 });
+    let s = sessionReducer(initialSession, {
+      type: "start",
+      mode: "flags",
+      roundKey: "Flags:Oceania",
+      targetCodes: ["FJI", "TON", "WSM"],
+      queue: ["TON", "FJI", "WSM"],
+    });
+    expect(sessionReducer(s, { type: "guess", guess: g("FJI") })).toBe(s); // not the flag on screen
+    s = sessionReducer(s, { type: "hint", target: "TON" });
+    s = sessionReducer(s, { type: "hint", target: "TON" });
+    expect(s).toMatchObject({ hintsUsed: 2, flagHints: 2, hintTargets: ["TON", "TON"] });
+    expect(sessionReducer(s, { type: "hint", target: "TON" })).toBe(s); // two per flag
+    s = sessionReducer(s, { type: "skip" });
+    expect(s).toMatchObject({ queue: ["FJI", "WSM", "TON"], flagHints: 0, hintsUsed: 2 });
+    s = sessionReducer(s, { type: "guess", guess: g("FJI") });
+    s = sessionReducer(s, { type: "hint", target: "WSM" });
+    expect(s).toMatchObject({ queue: ["WSM", "TON"], hintsUsed: 3, flagHints: 1 });
+    s = sessionReducer(s, { type: "guess", guess: g("WSM") });
+    expect(s.flagHints).toBe(0);
+    expect(sessionReducer(s, { type: "skip" })).toBe(s); // nothing to skip to
+    s = sessionReducer(s, { type: "guess", guess: g("TON") });
+    expect(s.status).toBe("won");
+  });
+
+  it("a capped route ends in a Game Over on its last allowed move, unless that move completes it", () => {
+    const puzzle = { start: "PRT", end: "POL", par: 3, shortest: ["PRT", "ESP", "FRA", "DEU", "POL"] };
+    const g = (code: string): Guess => ({ country: byCode.get(code)!, typed: code, distance: 0 });
+    let s = sessionReducer(initialSession, { type: "startRoute", puzzle, limit: 3 });
+    s = sessionReducer(s, { type: "step", guess: g("ESP"), complete: false });
+    s = sessionReducer(s, { type: "step", guess: g("MAR"), complete: false });
+    const lastChance = s;
+    const won = sessionReducer(lastChance, { type: "step", guess: g("DEU"), complete: true });
+    expect(won).toMatchObject({ status: "won", outOfGuesses: false, moves: 3 });
+    const over = sessionReducer(lastChance, { type: "step", guess: g("AND"), complete: false });
+    expect(over).toMatchObject({ status: "forfeited", outOfGuesses: true, moves: 3 });
+    expect(sessionReducer(over, { type: "step", guess: g("FRA"), complete: false })).toBe(over);
+    // No cap: any number of moves.
+    let free = sessionReducer(initialSession, { type: "startRoute", puzzle });
+    for (const code of ["ESP", "MAR", "AND", "FRA"]) free = sessionReducer(free, { type: "step", guess: g(code), complete: false });
+    expect(free.status).toBe("playing");
   });
 
   it("counts every committed answer, accepted or not", () => {

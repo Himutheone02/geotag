@@ -155,3 +155,23 @@ export function addDays(key: string, days: number): string {
   const [y, m, d] = key.split("-").map(Number);
   return dateKey(new Date(y, m - 1, d + days));
 }
+
+/* ------------------------------------------------------------------ */
+/* Daily Archive                                                       */
+/* ------------------------------------------------------------------ */
+
+/** The first date the Daily Archive offers. */
+export const ARCHIVE_START = "2026-10-01";
+/**
+ * The first date both dailies were dealt by today's rules (their own seeds, and Guessing's
+ * 11-round deck). The archive deals every date by today's rules, so its puzzles before this
+ * date can differ from the ones that were live then.
+ */
+export const DAILY_RULES_SINCE = "2026-10-30";
+
+/** Every archive date: yesterday back to ARCHIVE_START, newest first. Today is never in it. */
+export function archiveDates(today: string, start: string = ARCHIVE_START): string[] {
+  const dates: string[] = [];
+  for (let date = addDays(today, -1); date >= start; date = addDays(date, -1)) dates.push(date);
+  return dates;
+}

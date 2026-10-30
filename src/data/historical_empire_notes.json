@@ -1,0 +1,60 @@
+{
+  "Roman_Empire": {
+    "Ukraine": "Tyras, on the Dniester, part of Moesia Inferior from AD 56",
+    "Slovakia": "Gerulata (now Rusovce, in Bratislava), on the Danube frontier",
+    "Armenia": "Trajan's province of Armenia, AD 114–117",
+    "Iraq": "Trajan's province of Mesopotamia (116–117), later the far northwest",
+    "Saudi Arabia": "The northwest, Hegra included, in Arabia Petraea from AD 106",
+    "Morocco": "The north, as Mauretania Tingitana"
+  },
+  "Mughal_Empire": {
+    "Afghanistan": "Kabul, and Kandahar at times"
+  },
+  "Ottoman_Empire": {
+    "Iran": "Tabriz and the northwest, an Ottoman province 1585–1603",
+    "Slovakia": "The south, as the Uyvar (Nové Zámky) province, 1663–1685",
+    "Croatia": "Slavonia and the east, until 1699",
+    "Hungary": "The centre, around Buda, 1541–1686",
+    "Romania": "Dobruja and the Banat of Timișoara (Wallachia and Moldavia were vassals)",
+    "Moldova": "Bender (Tighina), an Ottoman fortress district from 1538",
+    "Ukraine": "Crimea's south coast, Ochakiv, and Podolia (1672–1699)",
+    "Russia": "Azov and the Taman coast",
+    "Georgia": "The southwest: Akhaltsikhe and Batumi",
+    "Armenia": "Yerevan, 1583–1604 and 1724–1736",
+    "Azerbaijan": "Shirvan and Ganja, around 1578–1607 and 1724–1735",
+    "Qatar": "A garrison and district at Doha, 1871–1915",
+    "Saudi Arabia": "The Hejaz and al-Hasa",
+    "Eritrea": "Massawa, from 1557",
+    "Sudan": "Suakin, from the 1550s",
+    "Somalia": "Zeila, from 1559"
+  },
+  "Soviet_Union": {
+    "Poland": "Białystok and its region, annexed to the Byelorussian SSR in 1939",
+    "Finland": "Porkkala, a Soviet-run naval base, 1944–1956"
+  },
+  "British_Empire": {
+    "United States": "The Thirteen Colonies, until 1783",
+    "China": "Hong Kong (1841–1997) and Weihaiwei (1898–1930)",
+    "Spain": "Menorca, 1708–1802, with gaps",
+    "Germany": "Heligoland, 1807–1890",
+    "France": "Dunkirk, 1658–1662",
+    "Morocco": "Tangier, 1661–1684",
+    "Indonesia": "Bencoolen (Bengkulu), 1685–1824",
+    "Senegal": "Saint-Louis, as the Province of Senegambia, 1765–1779",
+    "Guinea": "The Îles de Los, 1818–1904",
+    "Suriname": "An English colony, 1650–1667",
+    "Honduras": "The Bay Islands colony, 1852–1860",
+    "Colombia": "The Providence Island colony, 1630–1641",
+    "Oman": "The Khuriya Muriya Islands, 1854–1967",
+    "Yemen": "Aden, 1839–1967",
+    "Namibia": "Walvis Bay from 1878; the whole country run by South Africa from 1920",
+    "Nauru": "Run by Australia for the British Empire, 1920–1968",
+    "Samoa": "Run by New Zealand, 1920–1962",
+    "Sudan": "Anglo-Egyptian Sudan, 1899–1956, run by British officials",
+    "South Sudan": "Anglo-Egyptian Sudan, 1899–1956, run by British officials",
+    "Israel": "Mandatory Palestine, 1920–1948",
+    "Palestine": "Mandatory Palestine, 1920–1948",
+    "Cameroon": "The southern British Cameroons, joined in 1961",
+    "Vanuatu": "The New Hebrides, run jointly with France"
+  }
+}

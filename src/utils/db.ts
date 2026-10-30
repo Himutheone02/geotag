@@ -40,6 +40,10 @@ export type RoundRecord = {
   /** Pathfinding only. */
   moves: number | null;
   par: number | null;
+  /** Pathfinding: the capped daily ran out of guesses (a Game Over, not a Give Up). */
+  outOfGuesses?: boolean;
+  /** A Daily Archive replay: the date of the puzzle replayed. Never counts as a daily. */
+  archive?: string;
   /** The autocomplete list showed answers at some point during the round. */
   assisted: boolean;
   finishedAt: number;
@@ -51,6 +55,11 @@ export type RoundRecord = {
   share?: string;
   /** List rounds: every correct answer in order. Absent on older records and on routes. */
   answers?: AnswerRecord[];
+  /**
+   * List rounds: the countries asked for, so a give-up's misses are known even when the round
+   * can't be rebuilt from its key (Weak Spots picks its own). Absent on older records.
+   */
+  targets?: string[];
 };
 
 /**
@@ -96,8 +105,10 @@ export type DailyRecord = {
   moves: number | null;
   par: number | null;
   hintsUsed: number;
-  /** The spoiler-free share text, so the setup screen can share it again. */
+  /** The share text, so the setup screen can share it again. */
   share?: string;
+  /** Daily Pathfinding: ran out of guesses. */
+  outOfGuesses?: boolean;
 };
 
 export const dailyId = (kind: DailyKind, date: string) => `${kind}:${date}`;
@@ -345,7 +356,7 @@ export type ProfileSummary = {
   byMode: ModeStats[];
 };
 
-const MODES: GameMode[] = ["continent", "historical", "world", "pathfinding"];
+const MODES: GameMode[] = ["continent", "historical", "world", "flags", "practice", "pathfinding"];
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
 /** Summarizes rounds. Pass only unassisted rounds to compare like with like. */
@@ -385,8 +396,18 @@ export type DailyStats = {
  * daily is finished, completed or given up, so only a missed day ends a streak. Today not
  * played yet doesn't end it; it's still open until midnight. Completions are counted apart.
  */
+/**
+ * Whether a daily result counts as a day played: completed, or given up after at least one
+ * correct answer (guessing) or one valid move (pathfinding). The game no longer saves an
+ * empty give-up as the day's daily; this also filters any saved before it stopped.
+ */
+export function countsAsPlayed(record: Pick<DailyRecord, "kind" | "result" | "correct" | "moves">): boolean {
+  if (record.result === "won") return true;
+  return record.kind === "pathfinding" ? (record.moves ?? 0) > 0 : record.correct > 0;
+}
+
 export function dailyStats(records: readonly DailyRecord[], today: string): DailyStats {
-  const played = new Set(records.map((r) => r.date));
+  const played = new Set(records.filter(countsAsPlayed).map((r) => r.date));
   let bestStreak = 0;
   for (const date of played) {
     if (played.has(addDays(date, -1))) continue; // not the first day of a run

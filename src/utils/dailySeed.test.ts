@@ -4,7 +4,9 @@ import { toSovereignStates, type RawCountry } from "@/data/loadCountries";
 import { CONTINENTS, GUESSING_POOL } from "@/app/CountryGuesser";
 import { EMPIRES } from "@/data/loadCountries";
 import {
+  ARCHIVE_START,
   addDays,
+  archiveDates,
   dailyGuessing,
   dailyPathfinding,
   dateKey,
@@ -174,4 +176,19 @@ describe("the two dailies", () => {
     }
     expect(pairs.size).toBeGreaterThan(365 * 0.9); // routes rarely repeat
   }, 30_000);
+});
+
+describe("archiveDates", () => {
+  it("is yesterday back to the archive's first date, newest first, never today", () => {
+    const dates = archiveDates("2026-11-02");
+    expect(dates[0]).toBe("2026-11-01");
+    expect(dates.at(-1)).toBe(ARCHIVE_START);
+    expect(dates).not.toContain("2026-11-02");
+    expect(dates).toHaveLength(32); // October's 31 days and November 1
+    expect([...dates].sort().reverse()).toEqual(dates);
+  });
+
+  it("is empty on the archive's first day", () => {
+    expect(archiveDates(ARCHIVE_START)).toEqual([]);
+  });
 });

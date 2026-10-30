@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "@/data/countries.json";
 import { resolveEmpires, toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import { CONTINENTS, type RoundKey } from "@/app/CountryGuesser";
-import SvgMap, { buildMapGeometry } from "./SvgMap";
+import { CONTINENTS, type MapKey as RoundKey } from "@/app/CountryGuesser";
+import SvgMap, { buildMapGeometry, frameAround } from "./SvgMap";
 import { buildBorderGraph, pickRoute } from "@/utils/pathfinding";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -253,6 +253,30 @@ describe("empire framing", () => {
     // Portugal near the left edge, Iraq near the right: the frame hugs the empire.
     expect(x("PRT")).toBeLessThan(vx + vw * 0.25);
     expect(x("IRQ")).toBeGreaterThan(vx + vw * 0.75);
+  });
+});
+
+describe("framing around a set of countries (Weak Spots)", () => {
+  it("frames Pacific islands across the 180° line instead of around the whole world", () => {
+    const pacific = ["PNG", "SLB", "VUT", "FJI", "TON", "WSM", "TUV", "KIR", "NRU", "MHL"];
+    const frame = frameAround(pacific);
+    const [[west], [east]] = frame.extent;
+    expect(east - west).toBeLessThan(120); // the ocean, not the planet
+    expect(east).toBeGreaterThan(180); // crosses the date line eastward
+    const g = buildMapGeometry({ around: pacific }, pacific);
+    for (const code of pacific) {
+      const t = g.targets.get(code)!;
+      const [x, y] = t.marker ?? t.origin;
+      const [vx, vy, vw, vh] = g.viewBox;
+      expect(x >= vx && x <= vx + vw && y >= vy && y <= vy + vh, code).toBe(true);
+    }
+  });
+
+  it("frames countries on one side of the world as before", () => {
+    const frame = frameAround(["FRA", "DEU", "POL"]);
+    expect(frame.extent[0][0]).toBeLessThan(2);
+    expect(frame.extent[1][0]).toBeGreaterThan(19);
+    expect(frame.extent[1][0]).toBeLessThan(60);
   });
 });
 

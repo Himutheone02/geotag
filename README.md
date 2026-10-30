@@ -1,6 +1,6 @@
 # geotag
 
-Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: connect two countries by naming land neighbours, building from either end, on a map hidden in fog. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and two hints per round help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats under **Profile & Stats** in the header. List rounds can be played for **capitals** instead of countries, two seeded **Daily Challenges** (Daily Guessing and Daily Pathfinding) give everyone the same puzzles each day, unlocking at local midnight, and results can be shared as a spoiler-free emoji grid.
+Next.js (App Router, TypeScript) geography game. Pick a round (a continent, a historical empire, or the whole world), then name every sovereign state in it against a running clock. Or play Pathfinding: connect two countries by naming land neighbours, building from either end, on a map hidden in fog. Vexillology Mode shows flags one at a time to name, and Weak Spots builds a practice round from the countries you're slowest at. Answers are recognized as you type, typos and alternate names included. Named countries fill in on a clay map, and two hints per round help when you're stuck. An optional autocomplete list suggests answers, and every finished round is saved to a local profile (IndexedDB) with stats under **Profile & Stats** in the header. List rounds can be played for **capitals** instead of countries, two seeded **Daily Challenges** (Daily Guessing and Daily Pathfinding) give everyone the same puzzles each day, unlocking at local midnight, and results can be shared as a spoiler-free emoji grid.
 
 ```bash
 npm install
@@ -28,7 +28,10 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, draws Pathfinding's fog of war (`fog`) and hint outlines (`revealed`), and takes a static color per country (`fills`) for the heatmap. Optional clicks (`clickable`, `onCountryClick`, `selected`). Memoized and lazy-loaded. |
 | `src/components/game/MapTooltip.tsx` | The clay tooltip shown by a map tap: absolutely positioned at the tap, kept inside the map, springs open. No library. |
 | `src/components/game/HintPanel.tsx` | The hint card: one button naming the next hint ("Capital City (0/2)"), and the hints given so far. Generic: the round passes its own two hints. Pure helpers `pickHintTarget` (a random missing country), `letterPattern` ("B _ _ _ _ _") and `letterCount`. |
-| `src/components/game/DailyCard.tsx` | One Daily Challenge card (Daily Guessing or Daily Pathfinding): today's puzzle, that daily's stats (played, completed, streak, best), and once played, the first result with its Share button. |
+| `src/components/game/DailyCard.tsx` | One Daily Challenge card (Daily Guessing or Daily Pathfinding): today's puzzle, that daily's stats (played, completed, streak, best), and once played, the first result with its Share button. Also `MidnightCountdown` and `formatCountdown` ("New puzzles in 7 h 12 min"). |
+| `src/components/game/ArchiveDialog.tsx` | The Daily Archive: every past date's two puzzles in a modal, marked ✓ once played (live or from the archive). |
+| `src/components/game/PathfindingIntro.tsx` | The three-card explainer shown once, before a player's first Pathfinding round. |
+| `src/utils/sound.ts` | Synthesized sound (Web Audio, no files): `playSound("pop" \| "thud")`, `unlockSound()`, `soundSupported()`. |
 | `src/components/game/ShareResult.tsx` | "Share result": copies the share text with `navigator.clipboard.writeText`; if the clipboard is unavailable the text stays visible to copy by hand. |
 | `src/components/game/SplashScreen.tsx` | Boot-up screen: the full logo, the coral PLAY button and a loader. PLAY unlocks once IndexedDB is open and the map data has loaded. |
 | `src/components/game/PartyBoard.tsx` | Party Mode's leaderboard and `rankParty` (finishers by time, then moves; players who gave up last, unranked). |
@@ -38,24 +41,33 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/ProfilePanel.tsx` | Profile & Stats: passport stamps, stat tiles, average winning time per mode (clay bar chart), the recall heatmap (reusing `SvgMap`), personal bests, recent rounds, clear history. Pure helpers `recallStats`, `recallBand`, `stampProgress`, `personalBests`. |
 | `public/fonts/` | Fredoka variable font (Latin subset, 68 KB) and its OFL license. Self-hosted, no runtime Google Fonts call. |
 | `src/utils/fuzzyMatch.ts` | Matching: `normalize`, `buildIndex` (country names, or capitals with `"capitals"`), `matchCountry`, `liveMatch` (per-keystroke rules), `suggestCountries` (autocomplete ranking), `answerForInput`, and the `Country` type. |
+| `src/utils/viewport.ts` | `watchVisualViewport()`: mirrors the visual viewport onto `<html>` (`--vv-height`, `--vv-top`, `data-keyboard` while an on-screen keyboard is up), and the pure `readViewport`. See "Typing on a phone". |
 | `src/utils/haptics.ts` | `vibrate()` (30 ms, feature-checked, never throws), `canVibrate()` and `hapticsUseful()` (the API exists and the pointer is coarse). |
 | `src/utils/dailySeed.ts` | Mulberry32 PRNG, FNV-1a hash of the date, `dateKey` (local YYYY-MM-DD), the two dailies (`dailyGuessing`, `dailyPathfinding`, each with its own seed), and local-midnight and calendar helpers (`startOfLocalDay`, `nextLocalMidnight`, `addDays`, `dayNumber`). Daily Guessing is dealt from a seeded deck (see Daily Challenges). |
 | `src/utils/share.ts` | Spoiler-free share text: `routeGrid`, `paceGrid`, `buildShareText`. |
 | `src/utils/db.ts` | Local profile in raw IndexedDB (database `country-recall`, version 3, stores `rounds`, `settings`, `party` and `dailies`): `saveRound`, `listRounds`, `clearRounds`, `getSetting`/`setSetting`, `savePartyResult`/`listPartyResults`, `saveDaily`/`listDailies`, and the pure `summarize` and `dailyStats`. Upgrading keeps existing rounds and settings, and version 3 copies the dailies already played into `dailies`. Every call fails soft when storage is unavailable. |
-| `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and the free-roam rules: `routeFrontier` (what may be named next), `routeComplete` (the named countries join the two ends) and `detourOf` (for the share grid). |
+| `src/utils/pathfinding.ts` | Land-border graph (`buildBorderGraph`), breadth-first search (`bfsDistances`, `shortestPath`), route puzzles (`pickRoute`) and the free-roam rules: `routeFrontier` (what may be named next), `routeComplete` (the named countries join the two ends), and `detourOf` / `detourTable` / `routeVerdict` (how far out of the way a guess is: the live chip colors and the share grid). |
 | `src/data/countries.json` | Country data: the app's only source, bundled at build time (the REST Countries fields the app uses). Nothing is fetched at runtime. |
 | `src/data/world-map.json` | Map data: Natural Earth 1:50m outlines keyed by cca3, simplified to 15% of points (163 KB, 52 KB gzipped), plus a marker point per sovereign state. Built by `scripts/build-map.mjs`. |
-| `src/data/loadCountries.ts` | Data loading: `getSovereignStates()` reads `countries.json` (no network), the sovereign-state rule (193 UN members + Vatican City + Palestine = 195), curated aliases (Ivory Coast, Burma, Holland, UK, DRC…), and `resolveEmpires` (empire name lists to country codes). |
-| `src/data/historical_empires.json` | The five empire lists from the project knowledge base, unchanged. |
+| `src/data/loadCountries.ts` | Data loading: `getSovereignStates()` reads `countries.json` (no network), the sovereign-state rule (193 UN members + Vatican City + Palestine = 195), curated aliases (Ivory Coast, Burma, Holland, UK, DRC…), and `resolveEmpires` (empire name lists to country codes, with each list's notes). |
+| `src/data/historical_empires.json` | The five empire lists, corrected to one inclusion rule (see "Empire lists"). |
+| `src/data/historical_empire_notes.json` | For countries only partly in an empire, which part and when ("Hong Kong (1841–1997)…"). Shown on chips and map tooltips. |
+| `src/data/flags.ts` | Generated: all 195 flags as SVG markup, keyed by cca3, from flag-icons (MIT; its notice is kept in the file). Loaded on demand as one build file. |
+| `scripts/build-flags.mjs` | `npm run build:flags`: rebuilds `flags.ts` from the `flag-icons` dev dependency (pinned to 7.6.0), minified with SVGO. |
+| `src/components/game/Flag.tsx` | `loadFlags()` / `useFlags()` (the on-demand flags chunk), `flagSrc()` (a `data:` URL per flag) and `<Flag>`: an `<img>`, so a flag can't run script, with an empty clay slot while loading. |
+| `src/utils/weakSpots.ts` | Weak Spots: `recallWithMisses` (each country's average recall time, misses included) and `pickWeakSpots` (the 10 weakest, padded at random). |
+| `src/data/empireRule.ts` | `EMPIRE_RULE`, the inclusion rule's text, shown on the Empires tab. Kept apart so the client bundle doesn't pull in the country data. |
 
 ## Modes
 
 | Mode | Rounds | Targets |
 | --- | --- | --- |
 | Continents | Africa (54), Americas (35), Asia (47), Europe (45), Oceania (14) | The continent's sovereign states |
-| Empires | Roman (43), Mughal (4), Ottoman (38), Soviet (15), British (66) | The modern states listed for that empire in `historical_empires.json` |
+| Empires | Roman (45), Mughal (4), Ottoman (37), Soviet (17), British (71) | The modern states listed for that empire in `historical_empires.json` |
 | World | World (195) | Every sovereign state |
-| Pathfinding | A random start and destination, 3–7 countries apart by land | Countries bordering where you stand |
+| Flags | Africa (54), Americas (35), Asia (47), Europe (45), Oceania (14), World (195) | The flag on screen: name its country |
+| Weak Spots | 10 countries from your own record | The 10 countries shown in white on the map |
+| Pathfinding | A random start and destination, 3–7 countries apart by land | Countries bordering your route |
 
 - **Empire lists:** names are resolved to country codes on the server by exact name or alias, never fuzzily, so a typo in the data can't map to the wrong country. "Turkey" and "The Gambia" resolve through aliases.
 - **Kosovo:** listed in the Roman and Ottoman empires but excluded from both rounds, because it isn't one of the 195 states the matcher recognizes. Left in, it would make those rounds impossible to finish.
@@ -71,6 +83,9 @@ Free roam, as in Travle: there is no "where you are".
 4. **Finish:** the route is complete as soon as the named countries join the start to the destination (a breadth-first search inside the board, `routeComplete`). The result compares your moves with the shortest route and shows one shortest route.
 5. **Give Up:** a small, recessed button under the map while the route is on (routes have no Forfeit button: this replaces it). It stops the timer at once, ends the route, and shows in red (`--route-missed`) the countries of one shortest route you never named, with a key under the map; the result card lists the whole route by name.
 6. **Generate New Route:** on the result card, next to Share via QR (stacked on narrow phones). It draws a new random route and starts it immediately, without going back to the menu.
+7. **Daily guess cap:** Daily Pathfinding (and its replays from the Daily Archive) allows the shortest route's length plus 4 moves (`DAILY_GUESS_MARGIN`). The counter shows "3 / 11 moves", a line under the prompt counts the guesses left and turns amber at 2, and the last one says so. Running out without joining the ends is a Game Over: "Out of guesses", with the shortest route shown as after a Give Up, shared as `🗺️ ❌ out of guesses (11/11 moves)`. A last guess that joins the route still wins. Random routes and challenge links have no cap; a party on a daily route keeps it for every player.
+
+**First route: a three-card explainer.** Before a player's very first Pathfinding round (random, daily, archive or a scanned challenge link), three short cards explain building from both ends, the fog, and that every guess is a move. Next and Back step through them; Skip, Escape or "Start the route" closes them, and the route (and its timer) starts only then. Seeing them is saved in IndexedDB (`intro-pathfinding`), so they never show again on that device. A route waits until the profile has been read, so a challenge link opened on a first visit still gets the cards.
 
 ### Fog of war
 
@@ -82,6 +97,21 @@ Two hints, in order:
 2. **Reveal All:** lifts the fog: the standard map with every border.
 
 A guess named while its borders were outlined (or any guess after Reveal All) counts as hinted. The map is framed around one shortest route.
+
+### Live colors (Travle rules)
+
+Each guess is judged the moment it's accepted, from how far out of the way it is (`detourTable`: distance from the start, plus distance to the destination, minus the shortest route):
+
+| Verdict | Detour | Chip | Feedback line |
+| --- | --- | --- | --- |
+| On a shortest route | 0 | green, ✓ | "Recognized: Spain: on a shortest route." |
+| One country out of the way | 1 | yellow, ≈ | "…: one country out of the way." |
+| Off course | 2 or more | red, ✕ | "…: off course: a route through it is 2 or more countries longer." (as a warning) |
+
+- The icon and a screen-reader label carry the verdict as well as the color; a key under the route explains the three. The start and destination keep their own colors.
+- The feedback line says it too, so the verdict is there on a phone with the keyboard up, when the route list is out of view.
+- The same verdicts color the share grid (🟩 🟨 🟥).
+- In a party, the result screens of players 2 onwards hide the colors along with the shortest route, since they'd give it away.
 
 ### Party Mode (pass and play)
 
@@ -143,6 +173,29 @@ The setup screen's **Name the: Countries / Capitals** switch applies to every li
 - **Hints:** the capital is the answer here, so the first hint is **Country** (it names a country whose capital is missing) instead of Capital City; **First Letter** then spells out how that capital starts ("C _ _ _ _ _ _ _" for Canberra).
 - Measured: typing each of the 201 accepted capitals letter by letter in its own continent, none credits the wrong country and none is accepted before it's complete.
 
+## Vexillology Mode (Flags)
+
+One flag at a time, shown big as a clay tile, for one region (a continent, or all 195). Type the country it belongs to.
+
+- **Same machinery:** the same matcher, field, live acceptance, typo tolerance and suggestions as every round. The only answer that counts is the flag on screen: another country, even one in the region, gets "Not Kenya. Try again, or skip this flag." Always country names, even with Capitals selected.
+- **Skip** sends the flag on screen to the back of the line (the order is shuffled each round).
+- **Hints:** each flag gets its own two, both about it: Capital City ("Its capital is Nairobi."), then First Letter ("K _ _ _ _"). The result counts every hint used in the round.
+- **Map:** the region's map fills in as you name flags, so you see where each one is. On a phone the flag comes first; with the keyboard up, the flag takes the map's place above the field.
+- **Results:** missed and named lists show each flag next to its country. Share text: `geotag - Europe flags`, 🚩.
+- **Flags:** [flag-icons](https://github.com/lipis/flag-icons) 7.6.0 (MIT), 4:3, chosen over smaller sets because it keeps emblems legible at this size (Bhutan's dragon, Mexico's eagle) and has current designs (Syria's 2025 flag, Kyrgyzstan's 2023 sun). `npm run build:flags` writes all 195 into `src/data/flags.ts`, minified with SVGO (which saves little: the files are already tight, and the size is real detail: Serbia alone is 175 KB). The ISO alpha-2 code for each comes from `countries.json`.
+- **Size and offline:** about 1.2 MB, 395 KB gzipped, as one build file loaded when Flags opens and in the background 3.5 s after start-up, so the service worker has it after one visit. Checked in Chromium: after one online visit, a flag round plays with the network off.
+- **Recall data:** flag rounds save their answers, but the heatmap and Weak Spots leave them out: recognizing a flag is a different skill from recalling a name.
+
+## Weak Spots (practice)
+
+A round of the 10 countries you're worst at naming, picked from your own saved rounds each time the tab opens.
+
+- **Evidence per country:** every country-name list round (not capitals, flags or routes) with saved answers. An answer counts its time since the previous one (hinted or picked from the list: at least 30 s, as on the heatmap); a country asked for in a given-up round but never named is a miss, counted as 60 s. A country's weakness is its average over all of these.
+- **The round:** the 10 weakest; with fewer than 10 countries of evidence, the rest at random, from countries you haven't been asked for yet. The tab says how many came from your profile.
+- **Play:** name the 10 countries shown in white on the map, which zooms to fit them (across the 180° line for Pacific islands). The usual hints work. Your answers are saved like any round's, so the list changes as you improve; **New Weak Spots round** picks again.
+- Round records now carry the countries asked for (`targets`), so a Weak Spots round's misses count too. Older records are matched to their round by key.
+- Weak Spots has no personal bests (it's different every time).
+
 ## Daily Challenges
 
 Two dailies, side by side on the setup screen, each with its own seed and its own records:
@@ -161,8 +214,19 @@ Two dailies, side by side on the setup screen, each with its own seed and its ow
 - **Local midnight:** both unlock at the player's local midnight (`nextLocalMidnight`, built on `setHours(0, 0, 0, 0)`), not 24 hours after the last play. The setup screen rolls over to the new day on its own: a timer is set for the next midnight, and because timers stall while a device sleeps, the date is checked again whenever the page comes back into view. Pressing Play on a screen left open past midnight shows the new dailies instead of starting yesterday's.
 - **Which day a result belongs to:** the puzzle's date, taken when the daily starts. A daily started at 23:58 and finished at 00:03 is yesterday's result, so it can't lock you out of today's puzzle.
 - **Records:** the first finished attempt per daily and date goes into the `dailies` store (key `guessing:2026-10-29` or `pathfinding:2026-10-29`, written with `add`, so a second attempt can't replace it); the round is also saved to the profile as usual. **Play again** replays the same puzzle as an ordinary round (not tagged Daily, not shared as Daily).
-- **Stats per daily:** played, completed, current streak and best streak. A streak is consecutive calendar days **played**: a day counts once its daily is started and finished, completed or given up. Only a missed day ends a streak, and today still unplayed doesn't (it's open until midnight). Completions are counted separately. Clear history clears these too.
+- **Stats per daily:** played, completed, current streak and best streak. A streak is consecutive calendar days **played**: a day counts once its daily is finished, completed or given up after at least one correct answer (Daily Guessing) or one valid move (Daily Pathfinding). Only a missed day ends a streak, and today still unplayed doesn't (it's open until midnight). Completions are counted separately. Clear history clears these too.
+- **An empty give-up doesn't count:** Forfeit or Give Up before naming anything isn't saved as the day's daily at all (`countsAsPlayed` in `db.ts` also filters any saved earlier). The result card says so, the share text isn't titled Daily, and the daily is still open on the setup screen, so a mis-tap on Play can't cost a streak.
 - **Upgrading:** version 3 of the database copies every daily already in the profile into the new store: Pathfinding rounds to Daily Pathfinding, the rest to Daily Guessing.
+- **Countdown:** once both of today's dailies are played, the note under "Daily Challenges" becomes "Both done. New puzzles in 7 h 12 min", counting down to local midnight (rounded up to the minute, redrawn every 15 s). The cards report what's played to the page (`onStatus`), so it appears when the setup screen reads the profile.
+
+### Daily Archive
+
+**Past puzzles** (under "Daily Challenges") opens every past date's two puzzles, from yesterday back to 1 October 2026 (`ARCHIVE_START`), grouped by month, newest first. Every puzzle comes from its date's seed, so the archive works offline and needs no storage of its own.
+
+- **Replays don't count:** an archive puzzle plays as an ordinary round, marked **Archive** next to its title. It's never saved as that day's daily, so streaks, played and completed counts never move; the round itself goes to the profile's history (tagged Archive). Shared as `geotag - Daily Guessing 2026-10-28 (archive)`.
+- **Same rules:** Daily Guessing as countries, Daily Pathfinding with its guess cap.
+- **Played:** a ✓ marks each puzzle already played, live or from the archive, by the same bar as a streak day: at least one country named or one move made. Giving up before either leaves it unticked.
+- **Before 30 October 2026** (`DAILY_RULES_SINCE`) the dailies were dealt by earlier rules (one shared seed, then a 5-continent pool). The archive deals every date by today's rules, so those dates show puzzles that may differ from what was live; a note in the archive says so.
 
 ## Challenge links and QR sharing
 
@@ -191,9 +255,14 @@ geotag - Daily Pathfinding 2026-10-26
 - **List rounds:** up to 10 squares, each a tenth of the round's countries in the order named, by pace: 🟩 up to 6 s per country, 🟨 up to 15 s, 🟥 slower, ⬜ not reached. Hints add 💡 n; a forfeit adds 🏳️.
 - A round where suggestions showed adds "🔤 with suggestions".
 
-## Haptics
+## Haptics and sound
 
-A 30 ms buzz (`navigator.vibrate([30])`) on PLAY, on a map tap that shows a country, and when a route is completed. Every call is feature-checked (`typeof navigator.vibrate === "function"`) and wrapped in try/catch, so unsupported browsers do nothing.
+**Sound** (`src/utils/sound.ts`): a short "pop" for a right answer and a low "thud" for a dead end or an error (anything the feedback line shows as a warning or error, and a Game Over), synthesized with the Web Audio API: no audio files, so nothing to download and nothing missing offline. The pop is a 90 ms sine falling from 880 Hz to 440; the thud, a 190 ms triangle falling from 150 Hz to 55 over a sine an octave lower. Both are quiet.
+
+- **The toggle:** a speaker icon at the right of the logo row, before the vibration toggle, wherever Web Audio exists. **Off by default**; turning it on is saved in IndexedDB (`sound` setting) and plays one pop. Browsers only start audio from a tap, so the toggle's tap is what unlocks it; the context is woken again if the browser suspends it.
+- **iPhone:** this is the feedback iPhones get, since they have no vibration. The ring/silent switch mutes it, as it does any web page's sound.
+
+**Haptics:** a 30 ms buzz (`navigator.vibrate([30])`) on PLAY, on a map tap that shows a country, and when a route is completed. Every call is feature-checked (`typeof navigator.vibrate === "function"`) and wrapped in try/catch, so unsupported browsers do nothing.
 
 - **Where it works:** Chrome-based browsers on Android. No iPhone or iPad browser has the Vibration API, and desktops have nothing to vibrate. Browsers also ignore it until the person has tapped or typed on the page.
 - **The toggle** (a phone icon at the right of the logo row) is shown only where it can do something: the API exists and the main pointer is a finger (`(pointer: coarse)`). It's on by default; turning it off is saved in IndexedDB (`haptics` setting), and turning it back on gives one buzz.
@@ -205,7 +274,7 @@ geotag is an installable web app (PWA): Chrome checks it as installable with no 
 - **Manifest** (`public/manifest.json`): standalone display, starts at `/`, lilac theme color (`#f3efff`, the page's own), square PNG icons in `public/icons/`, cut from the mascot artwork on the splash's gradient: 192 and 512 ("any"), a 512 "maskable" one with the mascot inside the safe zone, a 180 Apple touch icon (iPhones and iPads use it, not the manifest's), and a 64 favicon. The wordmark (`/logo.png`, 511x168) and the full logo (`/assets/logo-full.webp`, 719x900) aren't square, so they can't be app icons.
 - **Service worker** (`public/sw.js`), registered after the page loads, production builds only:
   - **Install:** caches the page (the country data is built into it: there's no separate `countries.json` request), every `/_next/static/` file the page names (scripts and CSS, including chunks only named inside its inline data), the font, the logos and the icons.
-  - **Files loaded on demand:** the map and QR chunks aren't named in the page. The page hands the worker its list of loaded files (twice: when the worker is ready and 5 s later) and loads the QR chunk 2 s after start-up, so both are cached on the first visit.
+  - **Files loaded on demand:** the map, QR and flags chunks aren't named in the page. The page hands the worker its list of loaded files (twice: when the worker is ready and 5 s later), loads the QR chunk 2 s after start-up and the flags 3.5 s after, and the worker caches any build file it serves, so all three are there after the first visit.
   - **Serving:** pages network-first (online players always get the latest build; offline, or after 4 s without an answer, the cached page, for `?route=` links too); `/_next/static/` cache-first (file names change with their content); other files of ours from the cache, refreshed in the background. Other sites, non-GET and React Server Component requests are left alone.
   - **Updates:** the worker URL carries the build id (`NEXT_PUBLIC_BUILD_ID`, set in `next.config.ts`; pin it with `GEOTAG_BUILD_ID`). A new deploy installs a new worker, which caches the new build and deletes the old cache.
 - **Checked:** `sw.test.ts` runs the worker against a fake Cache Storage and network; in Chromium, after one visit, stopping the server entirely still lets the game load, draw the map, play a route, open the QR code, and open a `?route=` link.
@@ -245,7 +314,7 @@ The map only answers taps when that can't be used to cheat:
 
 ## Recall heatmap
 
-Each list round now saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint was about it (Capital City or First Letter), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
+Each list round (flag rounds aside) saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint was about it (Capital City or First Letter), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
 
 - Bands: under 4 s (green), 4–10 s, 10–20 s, over 20 s (red), blank for never named. A hinted answer counts as at least 30 s, so heavily hinted countries go red. Picked answers are recognition, not recall, and don't count. Countries and capitals are mapped separately.
 - Green to red as asked, with lightness falling at every step, so the order still reads for red-green color-blind players and in grayscale (checked with the dataviz palette validator; it only objects that the ramp isn't one hue, which green to red can't be).
@@ -301,11 +370,20 @@ Each hint says "Found: Kenya." once its country is named. The result line report
 
 With `liveMatch`, 191 of 195 correctly spelled names land on their last keystroke with no Enter. The other 4 (Niger, Guinea, Congo, Dominica) need Enter while their longer neighbour is unnamed. Each keystroke takes 0.5 ms median to process in the browser (p95 3.1 ms).
 
+## Typing on a phone
+
+When the answer field has focus and the on-screen keyboard is up, the round's essentials are pinned into the space above the keyboard: a one-line header (title, counter, timer), the map, which takes all the height that's left and scales down to fit, and the field with Check beside it and the feedback line under it. Hints, the route list, the map key and Give Up come back when the keyboard closes. Suggestions open upward, over the map. Nothing scrolls.
+
+- **Why not just `100dvh`:** the dynamic viewport units follow the browser's toolbars, not the keyboard. On iPhone the keyboard slides over the page and the layout viewport keeps its height, so `100dvh` doesn't change. `100dvh` is still the fallback (and the page's `min-height`).
+- **Android:** `interactiveWidget: "resizes-content"` (in `layout.tsx`) makes Chrome shrink the layout, and `100dvh`, for the keyboard.
+- **iPhone (and everything else):** `src/utils/viewport.ts` watches `window.visualViewport` (the area actually visible above the keyboard) and sets `--vv-height`, `--vv-top` (iOS pans the page under the keyboard) and `data-keyboard` on `<html>`, at most once per frame. The keyboard counts as up when the visible area is 150 px or more shorter than the tallest it has been at this width (toolbars move it less); rotating starts over, and pinch-zoom isn't mistaken for it.
+- The pinned layout is CSS only (`html[data-keyboard] .game:has(.answer-card input:focus)`, under 1024px with a touch pointer), so it ends the moment the keyboard closes, even if the field keeps focus (Android's back button).
+
 ## Layout
 
 - **Splash:** no card: the logo, PLAY, tagline and loader float centered on the full-screen peach-lavender gradient. The tagline is in full ink and pulses only to 75% opacity, so it stays above 4.5:1 contrast on the bare gradient at its faintest.
 - **Header:** the logo on the left; **Profile & Stats** and the vibration toggle on the right, on every screen. Profile & Stats is an icon on phones and a labelled pill from 600px. It isn't shown during a round: the profile's heatmap would give answers away.
-- **Phones and tablets (under 1024px):** one column, up to 760px wide.
+- **Phones and tablets (under 1024px):** one column, up to 760px wide. During a round the map comes straight after the header, above the answer field (grid `order` only: the markup and the reading order don't change).
 - **Desktop (1024px and up):** up to 1200px wide, in two columns, set in CSS by the screen (`.game-shell[data-screen="setup" | "round"]`, as `.game`'s grid items; no markup moves):
   - **Setup:** the two Daily Challenges stacked on the left (they stay in view on screens at least 860px tall), the mode picker on the right, where the tile grids widen to fill it. On tablets (720–1023px) the two dailies sit side by side.
   - **Rounds:** the answer field, hints, result and lists on the left; the map on the right, staying in view as the left column scrolls (its height capped to fit the screen). Pass and play's hand-over card is centered across both.
@@ -355,7 +433,16 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 - Pathfinding treats each country as one place, so routes can cross water inside a country: Thailand → Malaysia → Indonesia → Papua New Guinea is legal because Malaysia borders Thailand on the mainland and Indonesia on Borneo. Spain–Morocco counts through Ceuta and Melilla.
 - The pathfinding map is framed around one shortest route; a long detour can wander past its edges.
 - The fog hides borders, not coastlines: an island country (the UK, Sri Lanka) is still recognizable by its shape.
-- The empire lists are the game's answer key, taken as given. Worth a historical review: see "Empire data to review" below.
+- Vexillology Mode is visual: screen readers hear "The flag to name" (never the answer), so it can't be played without sight. Every other mode can.
+- The flags chunk (395 KB gzipped) is the largest file in the app, and the first visit downloads it in the background even if Flags is never played; that's the price of flags offline. The full-color set without emblem detail would be 57 KB.
+- Afghanistan shows the black, red and green tricolor, as flag-icons does, not the Taliban's white flag. Disputed flags follow the library; change `scripts/build-flags.mjs` to override one.
+- The Daily Archive's puzzles before 30 October 2026 are re-dealt by today's rules (see "Daily Archive").
+- The guess cap's margin (shortest route plus 4) is a judgment call, not tuned with players. Change `DAILY_GUESS_MARGIN` to adjust it.
+- The Pathfinding explainer is saved per browser: a player on a second device sees it once there too.
+- Weak Spots only knows what's been saved in this browser, and only from rounds played since answers were recorded.
+- The empire lists apply one rule, but history has edge cases: see "Empire lists" for the calls made and the borderline ones.
+- The pinned keyboard layout was checked in desktop Chromium with phone emulation and a shrunken viewport (how Android behaves). The iPhone path (`--vv-top` panning) is unit-tested but not yet checked on a real iPhone.
+- A phone with a hardware keyboard attached shows no on-screen keyboard, so the page keeps its normal layout; that's intended.
 - The Mughal round has only 4 countries, so it lasts seconds.
 - Borders only link sovereign states: Morocco–Western Sahara and Brazil–French Guiana don't count in Pathfinding.
 - Reveal Adjacent and Reveal All are visual. Screen-reader users get their text, but not the outlines.
@@ -368,10 +455,30 @@ Two-typo misses are mostly inputs that genuinely sit closer to another name ("au
 - The bundled `countries.json` was generated from the mledoze/countries dataset, which uses the same field structure REST Countries serves. `npm run snapshot` replaces it with a fresh pull from REST Countries; that's a maintenance step run on your machine, never by the app.
 - **No network at runtime:** the page is fully static (built once, no revalidation), and no app code calls `fetch` or any other network API. A test (`loadCountries.test.ts`, "offline-first guard") fails if one is added. The only `fetch` calls are the service worker's, which only ever fetch the game's own files to cache them. After one online visit the game opens with no connection (see "Install and offline").
 
-## Empire data to review
+## Empire lists
 
-The app uses `historical_empires.json` exactly as provided. These entries look doubtful; edit the file to change them:
+Every list follows one rule, shown on the Empires tab (`EMPIRE_RULE`):
 
-- **British Empire omits** the United States (the Thirteen Colonies), Mauritius and Seychelles, all of which were British territory.
-- **Ottoman Empire omits** Croatia (Slavonia was Ottoman for about 150 years) and Slovakia (Ottoman Uyvar province). It **includes** the United Arab Emirates, which the Ottomans never ruled; Oman and Bahrain are also doubtful.
-- **Roman Empire includes** Moldova, which lay outside Roman Dacia. It **omits** Saudi Arabia, whose northwest (Hegra) was in the province of Arabia Petraea.
+> **Any part of today's country was directly governed by the empire during its era** (the era on its tile). Annexed or run by its own officials counts. Vassals, protected states with their own rulers, and wartime occupations don't.
+
+"Any part" is what lets the US count for the British Empire (the Thirteen Colonies), and it also brings in places that surprise: China (Hong Kong), Spain (Menorca), Germany (Heligoland). Where only part of a country qualified, `historical_empire_notes.json` says which part and when, and the game shows it on the country's chip and its map tooltip after the round.
+
+Changes from the original lists:
+
+| Empire | Removed | Added |
+| --- | --- | --- |
+| Roman (45) | Moldova (outside Dacia) | Ukraine (Tyras, in Moesia Inferior from AD 56), Armenia (Trajan's province, 114–117), Saudi Arabia (Hegra, Arabia Petraea) |
+| Ottoman (37) | UAE, Oman, Bahrain (never ruled), Kuwait (nominal suzerainty only) | Croatia (Slavonia), Slovakia (Uyvar province, 1663–1685), Iran (Tabriz province, 1585–1603) |
+| Soviet (17) | | Poland (Białystok, annexed to the Byelorussian SSR in 1939), Finland (Porkkala, a Soviet-run naval base, 1944–1956) |
+| British (71) | Kuwait, Bahrain, Qatar, UAE, Maldives, Tonga, Brunei (protected states with their own rulers); Egypt, Jordan, Iraq (their own governments under a protectorate or mandate) | United States, Mauritius, Seychelles, China, Spain, Germany, France (Dunkirk, 1658–1662), Morocco (Tangier, 1661–1684), Indonesia (Bencoolen), Senegal (Senegambia), Guinea (Îles de Los), Suriname, Honduras (Bay Islands), Colombia (Providence Island), Nauru |
+| Mughal (4) | | |
+
+Oman stays British: the Khuriya Muriya Islands were part of Aden Colony from 1854 to 1967.
+
+Borderline calls, left as they are; edit the JSON files to change them:
+
+- **Ottoman Djibouti** is kept as provided: the Habesh province's coast is usually drawn to include Tadjoura, but direct Ottoman rule there is thinly documented.
+- **Ottoman Chad** is not added: Ottoman troops held Bardaï in the Tibesti from 1908 to 1913, but it's unclear it was ever administered.
+- **Roman Georgia** is not added: Roman forts on the coast (Apsaros, Phasis) were garrisons among client kingdoms, not a province.
+- **British Iraq** is out: Britain ran Mesopotamia directly from 1914 to 1921, but as a wartime occupation, then through a mandate with its own king. Palestine stays: its mandate was run by a British High Commissioner.
+- **Mandates run by the Dominions** (Samoa by New Zealand, Nauru by Australia, Namibia by South Africa) count as British Empire rule.

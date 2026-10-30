@@ -14,6 +14,8 @@ const MODE_LABELS: Record<GameMode, string> = {
   continent: "Continents",
   historical: "Empires",
   world: "World",
+  flags: "Flags",
+  practice: "Weak Spots",
   pathfinding: "Pathfinding",
 };
 
@@ -286,6 +288,7 @@ function HistoryRow({ round: r, isBest }: { round: RoundRecord; isBest: boolean 
         <span className="history-row__tags">
           <span className={won ? "tag tag--won" : "tag tag--lost"}>{won ? "Won" : "Forfeited"}</span>
           {r.daily && <span className="tag tag--daily">Daily</span>}
+          {r.archive && <span className="tag tag--daily">Archive</span>}
           {isBest && <span className="tag tag--best">Best</span>}
           {r.assisted && <span className="tag">Suggestions</span>}
         </span>
@@ -306,7 +309,8 @@ type Best = { id: number | undefined; roundKey: string; label: string; mode: Gam
 export function personalBests(rounds: readonly RoundRecord[]): Best[] {
   const byKey = new Map<string, Best>();
   for (const r of rounds) {
-    if (r.result !== "won" || r.mode === "pathfinding") continue;
+    // Routes and Weak Spots change every time, so they have no personal bests.
+    if (r.result !== "won" || r.mode === "pathfinding" || r.mode === "practice") continue;
     const prev = byKey.get(r.roundKey);
     if (!prev) byKey.set(r.roundKey, { id: r.id, roundKey: r.roundKey, label: r.label, mode: r.mode, timeMs: r.timeMs, wins: 1 });
     else {
@@ -314,7 +318,7 @@ export function personalBests(rounds: readonly RoundRecord[]): Best[] {
       if (r.timeMs < prev.timeMs) Object.assign(prev, { id: r.id, timeMs: r.timeMs });
     }
   }
-  const order: GameMode[] = ["continent", "historical", "world", "pathfinding"];
+  const order: GameMode[] = ["continent", "historical", "world", "flags", "practice", "pathfinding"];
   return [...byKey.values()].sort((a, b) => order.indexOf(a.mode) - order.indexOf(b.mode) || a.label.localeCompare(b.label));
 }
 
@@ -348,7 +352,8 @@ export type RecallStat = { code: string; seconds: number; answers: number; hinte
 export function recallStats(rounds: readonly RoundRecord[], answer: AnswerKind = "countries"): RecallStat[] {
   const totals = new Map<string, { seconds: number; answers: number; hinted: number }>();
   for (const r of rounds) {
-    if (!r.answers || (r.answer ?? "countries") !== answer) continue;
+    // Flag rounds time recognizing a flag, not recalling a name: not on this map.
+    if (!r.answers || r.mode === "flags" || (r.answer ?? "countries") !== answer) continue;
     for (const a of r.answers) {
       if (a.picked) continue;
       const seconds = a.hinted ? Math.max(a.ms / 1000, HINT_PENALTY_SECONDS) : a.ms / 1000;

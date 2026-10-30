@@ -3,7 +3,8 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import snapshot from "./countries.json";
 import historicalEmpires from "./historical_empires.json";
-import { EMPIRES, getSovereignStates, resolveEmpires, toSovereignStates, type RawCountry } from "./loadCountries";
+import notesFile from "./historical_empire_notes.json";
+import { EMPIRE_RULE, EMPIRES, getSovereignStates, resolveEmpires, toSovereignStates, type RawCountry } from "./loadCountries";
 
 const countries = toSovereignStates(snapshot as RawCountry[]);
 const empires = resolveEmpires(countries);
@@ -34,12 +35,54 @@ describe("resolveEmpires", () => {
 
   it("has the expected round sizes", () => {
     expect(Object.fromEntries(empires.map((e) => [e.key, e.codes.length]))).toEqual({
-      Roman: 43,
+      Roman: 45,
       Mughal: 4,
-      Ottoman: 38,
-      Soviet: 15,
-      British: 66,
+      Ottoman: 37,
+      Soviet: 17,
+      British: 71,
     });
+  });
+});
+
+describe("empire lists follow the inclusion rule (direct rule, any time in the era)", () => {
+  const listOf = (key: string) => new Set(empires.find((e) => e.key === key)!.codes);
+  const code = (name: string) => countries.find((c) => c.name === name)!.code;
+  const has = (key: string, name: string) => listOf(key).has(code(name));
+
+  it("drops countries the empire never governed", () => {
+    expect(has("Roman", "Moldova")).toBe(false); // outside Roman Dacia
+    for (const name of ["United Arab Emirates", "Oman", "Bahrain", "Kuwait"]) expect(has("Ottoman", name)).toBe(false);
+  });
+
+  it("drops protected states that kept their own rulers, and governments under a mandate or protectorate", () => {
+    for (const name of ["Kuwait", "Bahrain", "Qatar", "United Arab Emirates", "Maldives", "Tonga", "Brunei", "Egypt", "Jordan", "Iraq"]) {
+      expect(has("British", name)).toBe(false);
+    }
+  });
+
+  it("adds countries where any part was directly governed", () => {
+    for (const name of ["Ukraine", "Armenia", "Saudi Arabia"]) expect(has("Roman", name)).toBe(true);
+    for (const name of ["Croatia", "Slovakia", "Iran"]) expect(has("Ottoman", name)).toBe(true);
+    for (const name of ["Poland", "Finland"]) expect(has("Soviet", name)).toBe(true);
+    for (const name of ["United States", "Mauritius", "Seychelles", "China", "Spain", "Germany", "France", "Morocco", "Oman"]) {
+      expect(has("British", name)).toBe(true);
+    }
+  });
+
+  it("explains every partial entry with a note, and only for countries on that list", () => {
+    const british = empires.find((e) => e.key === "British")!;
+    expect(british.notes[code("China")]).toBe("Hong Kong (1841–1997) and Weihaiwei (1898–1930)");
+    expect(british.notes[code("Oman")]).toBe("The Khuriya Muriya Islands, 1854–1967");
+    for (const empire of empires) {
+      for (const noted of Object.keys(empire.notes)) expect(empire.codes).toContain(noted);
+    }
+    // Every note in the data file resolves (a misspelled name would silently lose its note).
+    const total = Object.values(notesFile as Record<string, Record<string, string>>).reduce((n, notes) => n + Object.keys(notes).length, 0);
+    expect(empires.reduce((n, e) => n + Object.keys(e.notes).length, 0)).toBe(total);
+  });
+
+  it("keeps the rule text short enough for the setup screen", () => {
+    expect(EMPIRE_RULE.short.length + EMPIRE_RULE.detail.length).toBeLessThan(220);
   });
 });
 

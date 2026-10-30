@@ -3,6 +3,7 @@
 // at build time or in the browser.
 import snapshot from "./countries.json";
 import historicalEmpires from "./historical_empires.json";
+import historicalEmpireNotes from "./historical_empire_notes.json";
 import { buildIndex, normalize, type Country } from "@/utils/fuzzyMatch";
 
 /* ------------------------------------------------------------------ */
@@ -206,6 +207,8 @@ export const EMPIRES = [
 
 export type EmpireKey = (typeof EMPIRES)[number]["key"];
 
+export { EMPIRE_RULE } from "./empireRule";
+
 export type EmpireRound = {
   key: EmpireKey;
   title: string;
@@ -214,6 +217,8 @@ export type EmpireRound = {
   codes: string[];
   /** Listed names that aren't one of the 195 sovereign states (Kosovo), so they can't be targets. */
   excluded: string[];
+  /** cca3 -> which part qualified, where only part of a country did ("Hong Kong (1841–1997)…"). */
+  notes: Record<string, string>;
 };
 
 /**
@@ -224,17 +229,28 @@ export type EmpireRound = {
 export function resolveEmpires(countries: Country[]): EmpireRound[] {
   const index = buildIndex(countries);
   const lists = historicalEmpires as Record<string, string[]>;
+  const allNotes = historicalEmpireNotes as Record<string, Record<string, string>>;
+  const codeOf = (name: string) => {
+    const match = index.exact.get(normalize(name));
+    return match?.length === 1 ? match[0] : null;
+  };
   return EMPIRES.map((empire) => {
     const codes: string[] = [];
     const excluded: string[] = [];
     for (const name of lists[empire.dataKey] ?? []) {
-      const match = index.exact.get(normalize(name));
-      if (match?.length === 1) {
-        if (!codes.includes(match[0])) codes.push(match[0]);
+      const code = codeOf(name);
+      if (code) {
+        if (!codes.includes(code)) codes.push(code);
       } else {
         excluded.push(name);
       }
     }
-    return { key: empire.key, title: empire.title, era: empire.era, codes, excluded };
+    // A note only shows for a country on this empire's list.
+    const notes: Record<string, string> = {};
+    for (const [name, note] of Object.entries(allNotes[empire.dataKey] ?? {})) {
+      const code = codeOf(name);
+      if (code && codes.includes(code)) notes[code] = note;
+    }
+    return { key: empire.key, title: empire.title, era: empire.era, codes, excluded, notes };
   });
 }

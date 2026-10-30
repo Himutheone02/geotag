@@ -88,3 +88,20 @@ describe("buildShareText", () => {
     expect(formatShareTime(3_599_999)).toBe("59:59");
   });
 });
+
+describe("buildShareText: archive replays and the daily guess cap", () => {
+  const route = { kind: "route" as const, title: "Pathfinding", won: false, timeMs: 72_000, grid: "🟩", assisted: false, moves: 11, par: 7 };
+
+  it("marks an archive replay in the heading", () => {
+    expect(buildShareText({ ...route, daily: null, archive: "2026-10-28" }).split("\n")[0]).toBe("geotag - Daily Pathfinding 2026-10-28 (archive)");
+  });
+
+  it("shows moves against the cap, and a Game Over as out of guesses", () => {
+    expect(buildShareText({ ...route, daily: "2026-10-30", limit: 11, outOfGuesses: true }).split("\n")[1]).toBe(
+      "🗺️ ❌ out of guesses (11/11 moves) ⏱️ 01:12",
+    );
+    expect(buildShareText({ ...route, daily: "2026-10-30", won: true, moves: 9, limit: 11 }).split("\n")[1]).toBe(
+      "🗺️ 9/11 moves (shortest 7) ⏱️ 01:12",
+    );
+  });
+});

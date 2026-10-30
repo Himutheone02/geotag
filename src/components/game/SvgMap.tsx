@@ -5,7 +5,7 @@ import { geoGraticule, geoNaturalEarth1, geoPath, type GeoPath, type GeoProjecti
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { feature } from "topojson-client";
 import type { GeometryCollection, Topology } from "topojson-specification";
-import type { RoundKey } from "@/app/CountryGuesser";
+import type { MapKey } from "@/app/CountryGuesser";
 import worldMap from "@/data/world-map.json";
 
 /* ------------------------------------------------------------------ */
@@ -51,7 +51,7 @@ const WORLD_FRAME: MapFrame = { center: 10, extent: [[-170, -57], [190, 80]] };
  * would follow Russia's center point into Siberia for the Ottoman round, and the
  * British Empire spans every longitude.
  */
-export const MAP_FRAMES: Record<RoundKey, MapFrame> = {
+export const MAP_FRAMES: Record<MapKey, MapFrame> = {
   Africa: { center: 18, extent: [[-26, -36], [60, 38]] },
   Americas: { center: -95, extent: [[-170, -56], [-30, 75]] },
   Asia: { center: 88, extent: [[25, -12], [150, 56]] },
@@ -74,8 +74,21 @@ export const MAP_FRAMES: Record<RoundKey, MapFrame> = {
  */
 export function frameAround(codes: readonly string[]): MapFrame {
   const points = codes.map((code) => POINTS[code]).filter(Boolean);
-  let west = Math.min(...points.map((p) => p[0]));
-  let east = Math.max(...points.map((p) => p[0]));
+  // The narrowest span of longitude holding every point, going either way round the globe:
+  // the points either side of the widest empty gap are the span's ends. So Pacific islands
+  // either side of the 180° line (Kiribati, Samoa, Fiji) frame across it, not around the world.
+  const lons = points.map((p) => p[0]).sort((a, b) => a - b);
+  let gapAfter = lons.length - 1; // the gap from the last point round to the first
+  let widest = lons[0] + 360 - lons[lons.length - 1];
+  for (let i = 0; i < lons.length - 1; i++) {
+    if (lons[i + 1] - lons[i] > widest) {
+      widest = lons[i + 1] - lons[i];
+      gapAfter = i;
+    }
+  }
+  let west = lons[(gapAfter + 1) % lons.length];
+  let east = lons[gapAfter];
+  if (east < west) east += 360; // crosses the 180° line: east may exceed 180
   let south = Math.min(...points.map((p) => p[1]));
   let north = Math.max(...points.map((p) => p[1]));
   const padLon = Math.max(8, (east - west) * 0.2);
@@ -96,7 +109,7 @@ export function frameAround(codes: readonly string[]): MapFrame {
 }
 
 /** How to frame the map: a round's named frame, an explicit frame, or "fit these countries". */
-export type FrameSpec = RoundKey | MapFrame | { around: readonly string[] };
+export type FrameSpec = MapKey | MapFrame | { around: readonly string[] };
 
 function resolveFrame(spec: FrameSpec): MapFrame {
   if (typeof spec === "string") return MAP_FRAMES[spec];

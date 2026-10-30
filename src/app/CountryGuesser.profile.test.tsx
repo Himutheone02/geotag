@@ -21,7 +21,10 @@ import {
   type RoundRecord,
 } from "@/utils/db";
 import { addDays, dateKey } from "@/utils/dailySeed";
-import CountryGuesser from "./CountryGuesser";
+import CountryGuesser, { PATHFINDING_INTRO_SETTING } from "./CountryGuesser";
+import { installFakeAudio, removeFakeAudio, tonesPlayed } from "@/test/fakeAudio";
+import { resetSound } from "@/utils/sound";
+import { longDate } from "@/components/game/DailyCard";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -34,7 +37,7 @@ function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
+  act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} pathfindingIntro={false} />));
 }
 
 function unmount() {
@@ -170,35 +173,56 @@ describe("Phase 6 records", () => {
     expect(saved.share).toMatch(/^geotag - Oceania Capitals\n🏙️ 1\/14 🏳️/);
   });
 
+  /** One country of a round, from its title ("Africa", "Roman Empire", "World"). */
+  const firstCountryOf = (title: string) => {
+    const empire = empires.find((e) => e.title === title);
+    const code = empire ? empire.codes[0] : title === "World" ? countries[0].code : countries.find((c) => c.region === title)!.code;
+    return countries.find((c) => c.code === code)!.name;
+  };
+
   const playButton = (kind: string) =>
     $$(`.daily-card[data-kind="${kind}"] button`).find((b) => /^Play/.test(b.textContent ?? "")) as HTMLButtonElement | undefined;
 
   it("after today's Daily Guessing, its card shows the result and stats, shares it, and a replay isn't the daily", async () => {
     await eventually(() => expect(playButton("guessing")?.disabled).toBe(false));
     expect(playButton("guessing")!.textContent).toBe("Play");
+    // An empty give-up first: it doesn't use up the daily.
     act(() => playButton("guessing")!.click());
+    clickButton("Forfeit");
+    await eventually(async () => expect(await listRounds()).toHaveLength(1));
+    expect((await listRounds())![0].daily).toBeNull();
+    expect(await listDailies("guessing")).toEqual([]);
+    clickButton("Choose another round");
+    await eventually(() => {
+      expect(playButton("guessing")?.textContent).toBe("Play"); // still open
+      expect(playButton("guessing")?.disabled).toBe(false); // the card has read the profile
+    });
+    // Then a real attempt: one country named, then a give-up.
+    act(() => playButton("guessing")!.click());
+    typeKeys(firstCountryOf($("h1")!.textContent!.replace(/Daily$/, "")));
+    if (input().value) pressEnter();
     clickButton("Forfeit");
     await eventually(async () => expect(await listDailies("guessing")).toHaveLength(1));
     const [first] = (await listRounds())!;
     expect(first.daily).toBe(dateKey());
     expect(first.share).toContain(`Daily Guessing ${dateKey()}`);
     const [saved] = (await listDailies("guessing"))!;
-    expect(saved).toMatchObject({ id: dailyId("guessing", dateKey()), kind: "guessing", date: dateKey(), result: "forfeited", correct: 0 });
+    expect(saved).toMatchObject({ id: dailyId("guessing", dateKey()), kind: "guessing", date: dateKey(), result: "forfeited", correct: 1 });
     expect(saved.startedAt).toBeLessThanOrEqual(saved.finishedAt);
     expect(await listDailies("pathfinding")).toEqual([]); // the other daily is untouched
 
     clickButton("Choose another round");
     const guessing = () => $('.daily-card[data-kind="guessing"]')!;
-    await eventually(() => expect(guessing().querySelector(".daily-card__done")?.textContent).toMatch(/^Done today: 0\/\d+ in \d\d:\d\d \(gave up\)\.$/));
+    await eventually(() => expect(guessing().querySelector(".daily-card__done")?.textContent).toMatch(/^Done today: 1\/\d+ in \d\d:\d\d \(gave up\)\.$/));
     expect(guessing().querySelector(".share-button")).not.toBeNull();
-    // A give-up is still a day played: it starts a streak, but isn't a completion.
+    // A give-up after naming a country is still a day played: it starts a streak, but isn't a completion.
     expect(text('.daily-card[data-kind="guessing"] .daily-stats > div')).toEqual(["Played1", "Completed0", "Streak1", "Best1"]);
     expect($('.daily-card[data-kind="pathfinding"] .daily-card__done')).toBeNull();
     expect($('.daily-card[data-kind="pathfinding"] .daily-stats')).toBeNull(); // nothing played yet
 
     clickButton("Play again");
     clickButton("Forfeit");
-    await eventually(async () => expect(await listRounds()).toHaveLength(2));
+    await eventually(async () => expect(await listRounds()).toHaveLength(3));
     const [replay] = (await listRounds())!;
     expect(replay.daily).toBeNull();
     expect(replay.share).not.toContain("Daily");
@@ -331,6 +355,8 @@ describe("Profile & Stats tab", () => {
       "Continents01:155.4 s per country · 2 of 3 rounds won",
       "Empires–Not played yet",
       "World–Not played yet",
+      "Flags–Not played yet",
+      "Weak Spots–Not played yet",
       "Pathfinding00:451.0 moves over the shortest route · 1 of 1 round won",
     ]);
     expect(text(".best-chip")).toEqual(["Oceania01:002 wins"]);
@@ -372,6 +398,221 @@ describe("Profile & Stats tab", () => {
     resetDbConnection();
     await openProfile();
     expect($(".profile .empty")!.textContent).toMatch(/^This browser isn't letting the game store anything/);
+  });
+});
+
+describe("Weak Spots practice", () => {
+  const byName = (code: string) => countries.find((c) => c.code === code)!.name;
+  const feedbackText = () => $(".feedback-region")?.textContent?.trim() ?? "";
+
+  it("builds the round from the slowest and missed countries in the profile", async () => {
+    // A given-up Oceania round: Fiji in 2 s, Tonga in 40 s, the other 12 never named.
+    await saveRound(
+      record({
+        result: "forfeited",
+        roundKey: "Oceania",
+        correct: 2,
+        answers: [
+          { code: "FJI", ms: 2_000, hinted: false, picked: false },
+          { code: "TON", ms: 40_000, hinted: false, picked: false },
+        ],
+      }),
+    );
+    const missed = countries
+      .filter((c) => c.region === "Oceania" && c.code !== "FJI" && c.code !== "TON")
+      .map((c) => c.code)
+      .sort();
+    clickButton("Weak Spots");
+    await eventually(() => expect($(".practice-source")!.textContent).toBe("All 10 come from your profile."));
+    clickButton("Start10");
+    expect($("h1")!.textContent).toBe("Weak Spots");
+    expect($(".route-prompt")!.textContent).toBe(
+      "Name the 10 countries shown in white on the map: the 10 you've been slowest to name, or have missed.",
+    );
+    expect($(".counter-total")!.textContent).toBe("/ 10");
+    typeKeys(byName(missed[0]));
+    if (input().value) pressEnter();
+    expect($(".counter-value")!.textContent).toBe("1");
+    typeKeys("Fiji"); // fast last time: not one of them
+    pressEnter();
+    expect(feedbackText()).toBe("Fiji isn't one of this round's weak spots.");
+    clickButton("Forfeit");
+    await eventually(async () => expect(await listRounds()).toHaveLength(2));
+    const [saved] = (await listRounds())!;
+    expect(saved).toMatchObject({ mode: "practice", roundKey: "WeakSpots", label: "Weak Spots", correct: 1, target: 10 });
+    expect([...saved.targets!].sort()).toEqual(missed.slice(0, 10)); // the 12 missed tie at 60 s: by code
+    // The next round is picked again, this one included: the one just named is faster now.
+    clickButton("New Weak Spots round");
+    await eventually(() => expect($(".practice-source")!.textContent).toBe("All 10 come from your profile."));
+  });
+
+  it("a new player gets 10 random countries, and the tab says so", async () => {
+    clickButton("Weak Spots");
+    await eventually(() =>
+      expect($(".practice-source")!.textContent).toBe(
+        "No answers saved yet, so all 10 are random. Play a few rounds and this fills with your slowest.",
+      ),
+    );
+    clickButton("Start10");
+    expect($(".route-prompt")!.textContent).toBe(
+      "Name the 10 countries shown in white on the map. They're picked at random until your profile has answers to go on.",
+    );
+    expect($(".counter-total")!.textContent).toBe("/ 10");
+  });
+
+  it("keeps flag rounds off the recall heatmap", async () => {
+    await saveRound(
+      record({ mode: "flags", roundKey: "Flags:Oceania", label: "Oceania flags", answers: [{ code: "FJI", ms: 50_000, hinted: false, picked: false }] }),
+    );
+    clickButton("Weak Spots");
+    await eventually(() => expect($(".practice-source")!.textContent).toMatch(/^No answers saved yet/));
+  });
+});
+
+describe("sound", () => {
+  const toggle = () => $<HTMLButtonElement>(".sound-toggle")!;
+  beforeEach(() => {
+    resetSound();
+    installFakeAudio();
+    unmount();
+    mount(); // with Web Audio there, the toggle shows
+  });
+  afterEach(() => {
+    removeFakeAudio();
+    resetSound();
+  });
+
+  it("is off by default, next to the vibration toggle", () => {
+    expect(toggle().getAttribute("aria-label")).toBe("Sound");
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().closest(".header-actions")).not.toBeNull();
+    clickButton("Oceania");
+    typeKeys("Fiji");
+    expect(tonesPlayed()).toEqual([]); // silent until turned on
+  });
+
+  it("turned on: a pop for a right answer, a thud for a wrong one; and it's remembered", async () => {
+    act(() => toggle().click());
+    expect(tonesPlayed()).toEqual([880]); // one pop to show it's on
+    clickButton("Oceania");
+    typeKeys("Fiji");
+    expect(tonesPlayed()).toEqual([880, 880]);
+    typeKeys("Narnia");
+    pressEnter();
+    expect(tonesPlayed()).toEqual([880, 880, 150, 75]);
+    await eventually(async () => expect(await getSetting("sound", false)).toBe(true));
+    unmount();
+    mount();
+    await eventually(() => expect(toggle().getAttribute("aria-pressed")).toBe("true"));
+  });
+});
+
+describe("Pathfinding explainer (once, before the first route)", () => {
+  const mountWithIntro = () => {
+    unmount();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<CountryGuesser countries={countries} empires={empires} showSplash={false} />));
+  };
+  const introTitle = () => $(".intro-dialog #intro-heading")?.textContent ?? null;
+
+  it("shows three cards before the first route, with the clock not running, then never again", async () => {
+    mountWithIntro();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50))); // the profile is read
+    clickButton("Pathfinding");
+    clickButton("Start");
+    await eventually(() => expect(introTitle()).toBe("Build from both ends"));
+    expect($(".route-prompt")).toBeNull(); // no round yet: no clock
+    expect($(".intro-card__step")!.textContent).toBe("Pathfinding · 1 of 3");
+    clickButton("Next");
+    expect(introTitle()).toBe("The map is in fog");
+    clickButton("Back");
+    expect(introTitle()).toBe("Build from both ends");
+    clickButton("Next");
+    clickButton("Next");
+    expect(introTitle()).toBe("Every guess is a move");
+    clickButton("Start the route");
+    await eventually(() => expect($(".route-prompt")).not.toBeNull());
+    expect($(".intro-dialog")).toBeNull();
+    expect($("[role=timer]")!.textContent).toBe("00:00");
+    await eventually(async () => expect(await getSetting(PATHFINDING_INTRO_SETTING, false)).toBe(true));
+
+    mountWithIntro();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    clickButton("Pathfinding");
+    clickButton("Start");
+    await eventually(() => expect($(".route-prompt")).not.toBeNull());
+    expect($(".intro-dialog")).toBeNull();
+  });
+
+  it("Skip closes all three and starts the route", async () => {
+    mountWithIntro();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    clickButton("Pathfinding");
+    clickButton("Start");
+    await eventually(() => expect(introTitle()).toBe("Build from both ends"));
+    clickButton("Skip");
+    await eventually(() => expect($(".route-prompt")).not.toBeNull());
+    await eventually(async () => expect(await getSetting(PATHFINDING_INTRO_SETTING, false)).toBe(true));
+  });
+});
+
+describe("daily countdown", () => {
+  const daily = (kind: DailyRecord["kind"]): DailyRecord => ({
+    id: dailyId(kind, dateKey()),
+    kind,
+    date: dateKey(),
+    result: "won",
+    timeMs: 1_000,
+    startedAt: 0,
+    finishedAt: 1_000,
+    label: "x",
+    correct: 1,
+    target: 1,
+    moves: kind === "pathfinding" ? 5 : null,
+    par: kind === "pathfinding" ? 5 : null,
+    hintsUsed: 0,
+  });
+
+  it("appears once both of today's dailies are played, counting down to midnight", async () => {
+    await saveDaily(daily("guessing"));
+    unmount();
+    mount();
+    await eventually(() => expect($(".daily-card__done")).not.toBeNull());
+    expect($(".dailies__countdown")).toBeNull(); // one still to play
+    await saveDaily(daily("pathfinding"));
+    unmount();
+    mount();
+    await eventually(() => expect($(".dailies__countdown")).not.toBeNull());
+    expect($(".dailies__countdown")!.textContent).toMatch(/^Both done\. New puzzles in (\d+ h( \d+ min)?|\d+ min)$/);
+    expect($(".dailies__note")).toBeNull();
+  });
+});
+
+describe("Daily Archive ticks", () => {
+  const today = dateKey();
+  const [d1, d2, d3] = [addDays(today, -1), addDays(today, -2), addDays(today, -3)];
+  const ticks = (date: string) => {
+    const day = $$(".archive-day").find((d) => d.querySelector(".archive-day__date")!.textContent === longDate(date));
+    if (!day) throw new Error(`No archive row for ${date}`);
+    return ["guessing", "pathfinding"].map((kind) => day.querySelector(`.archive-puzzle[data-kind="${kind}"]`)?.hasAttribute("data-played") ?? false);
+  };
+
+  it("ticks a puzzle played live or replayed, by the daily's bar: an empty give-up isn't a play", async () => {
+    await saveRound(record({ archive: d1, result: "forfeited", correct: 0, guesses: 0 })); // gave up empty
+    await saveRound(record({ archive: d1, mode: "pathfinding", roundKey: "route", result: "forfeited", correct: 0, moves: 2, par: 4 }));
+    await saveRound(record({ archive: d2, mode: "historical", roundKey: "Roman", result: "forfeited", correct: 3 }));
+    await saveRound(record({ result: "won" })); // an ordinary round: no tick anywhere
+    await saveDaily({ id: dailyId("guessing", d3), kind: "guessing", date: d3, result: "forfeited", timeMs: 1, startedAt: 0, finishedAt: 1, label: "x", correct: 2, target: 9, moves: null, par: null, hintsUsed: 0 });
+    unmount();
+    mount();
+    await eventually(() => expect($$(".dailies__archive")).toHaveLength(1));
+    clickButton("Past puzzles");
+    await eventually(() => expect($$(".archive-puzzle[data-played]").length).toBe(3));
+    expect(ticks(d1)).toEqual([false, true]);
+    expect(ticks(d2)).toEqual([true, false]);
+    expect(ticks(d3)).toEqual([true, false]);
   });
 });
 

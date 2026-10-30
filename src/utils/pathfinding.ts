@@ -157,10 +157,24 @@ export function routeComplete(graph: BorderGraph, puzzle: RoutePuzzle, guessed: 
  * takes over the shortest route. 0: it's on a shortest route.
  */
 export function detourOf(graph: BorderGraph, puzzle: RoutePuzzle, code: string): number {
+  return detourTable(graph, puzzle)(code);
+}
+
+/** detourOf for many countries: the two searches run once, then each lookup is instant. */
+export function detourTable(graph: BorderGraph, puzzle: Pick<RoutePuzzle, "start" | "end">): (code: string) => number {
   const fromStart = bfsDistances(graph, puzzle.start);
   const fromEnd = bfsDistances(graph, puzzle.end);
   const direct = fromStart.get(puzzle.end) ?? Infinity;
-  return (fromStart.get(code) ?? Infinity) + (fromEnd.get(code) ?? Infinity) - direct;
+  return (code) => (fromStart.get(code) ?? Infinity) + (fromEnd.get(code) ?? Infinity) - direct;
+}
+
+/**
+ * Travle's verdict on a guess, from its detour: "on" a shortest route (0), "near" one
+ * (1: a route through it is one country longer), or "off" course (2 or more).
+ */
+export type RouteVerdict = "on" | "near" | "off";
+export function routeVerdict(detour: number): RouteVerdict {
+  return detour <= 0 ? "on" : detour === 1 ? "near" : "off";
 }
 
 /* ------------------------------------------------------------------ */
