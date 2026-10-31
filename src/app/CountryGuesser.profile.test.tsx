@@ -110,7 +110,7 @@ describe("saving rounds", () => {
     typeKeys("Fiji"); // accepted
     typeKeys("Narnia");
     pressEnter(); // rejected, but still a guess
-    clickButton("Capital City");
+    clickButton("Starting Letters");
     const before = Date.now();
     clickButton("Forfeit");
 
@@ -261,21 +261,22 @@ describe("Phase 7: recall data, heatmap and stamps", () => {
     clickButton("Oceania");
     await new Promise((resolve) => setTimeout(resolve, 30));
     typeKeys("Fiji");
-    clickButton("Capital City"); // about one missing country: naming that one counts as hinted
-    const hint = $(".hint-text")!.textContent!;
-    const hinted = countries.find((c) => c.region === "Oceania" && c.capitals.length > 0 && hint.includes(` ${c.capitals.join(", ")}.`))!;
-    typeKeys(hinted.name);
+    // The tallies are about every missing country at once: answers named with both open keep
+    // their raw time (not hinted). Picked from the list is still recorded.
+    clickButton("Starting Letters");
+    clickButton("Name Lengths");
+    typeKeys("Palau");
     if (input().value) pressEnter();
-    const other = hinted.code === "WSM" ? { code: "TON", typed: "ton", label: "Tonga" } : { code: "WSM", typed: "sam", label: "Samoa" };
-    typeKeys(other.typed);
-    act(() => $$("[role=option]").find((o) => o.textContent === other.label)!.click());
+    typeKeys("sam");
+    act(() => $$("[role=option]").find((o) => o.textContent === "Samoa")!.click());
     clickButton("Forfeit");
     await eventually(async () => expect(await listRounds()).toHaveLength(1));
     const [saved] = (await listRounds())!;
+    expect(saved.hintsUsed).toBe(2);
     expect(saved.answers!.map((a) => [a.code, a.hinted, a.picked])).toEqual([
       ["FJI", false, false],
-      [hinted.code, true, false],
-      [other.code, false, true], // named after the hint, but the hint wasn't about it
+      ["PLW", false, false],
+      ["WSM", false, true],
     ]);
     expect(saved.answers![0].ms).toBeGreaterThanOrEqual(25);
     expect(saved.answers!.every((a) => a.ms >= 0)).toBe(true);

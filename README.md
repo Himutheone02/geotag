@@ -27,7 +27,8 @@ npm run build:map  # rebuild src/data/world-map.json (run after a snapshot refre
 | `src/components/game/Timer.tsx` | Isolated count-up stopwatch (MM:SS). Owns its own state, so ticks never re-render the game. |
 | `src/components/game/SvgMap.tsx` | Inline SVG map (d3-geo projection, no canvas/WebGL). Frames each continent, fills named countries, draws Pathfinding's fog of war (`fog`) and hint outlines (`revealed`), and takes a static color per country (`fills`) for the heatmap. Optional clicks (`clickable`, `onCountryClick`, `selected`). Memoized and lazy-loaded. |
 | `src/components/game/MapTooltip.tsx` | The clay tooltip shown by a map tap: absolutely positioned at the tap, kept inside the map, springs open. No library. |
-| `src/components/game/HintPanel.tsx` | The hint card: one button naming the next hint ("Capital City (0/2)"), and the hints given so far. Generic: the round passes its own two hints. Pure helpers `pickHintTarget` (a random missing country), `letterPattern` ("B _ _ _ _ _") and `letterCount`. |
+| `src/components/game/HintPanel.tsx` | The hint card: one button naming the next hint ("Starting Letters (0/2)"), and the hints given so far. Generic: the round passes its own two hints. `HintTally` draws a tally as clay chips; `letterPattern` ("B _ _ _ _ _") is for flag hints. |
+| `src/utils/hintTally.ts` | The Guessing hints' tallies: `startingLetters` and `nameLengths` over the missing answers, `letterCount`, `tallyText`. |
 | `src/components/game/DailyCard.tsx` | One Daily Challenge card (Daily Guessing or Daily Pathfinding): today's puzzle, that daily's stats (played, completed, streak, best), and once played, the first result with its Share button. Also `MidnightCountdown` and `formatCountdown` ("New puzzles in 7 h 12 min"). |
 | `src/components/game/ArchiveDialog.tsx` | The Daily Archive: every past date's two puzzles in a modal, marked ✓ once played (live or from the archive). |
 | `src/components/game/PathfindingIntro.tsx` | The three-card explainer shown once, before a player's first Pathfinding round. |
@@ -170,7 +171,7 @@ The setup screen's **Name the: Countries / Capitals** switch applies to every li
 - **Data:** the `capital` field in `countries.json`, with curated fixes in `loadCountries.ts`: `CAPITAL_OVERRIDES` where a country has more than one capital the data leaves out (Bolivia: Sucre or La Paz; Eswatini: Mbabane or Lobamba; Sri Lanka: Sri Jayawardenepura Kotte or Colombo; Palestine: Ramallah or East Jerusalem) and `CAPITAL_ALIASES` for other spellings (Kiev, Peking, Nur-Sultan, Washington, Delhi…). South Africa accepts Pretoria, Cape Town or Bloemfontein.
 - **Typing a country instead:** "Sweden is a country. Name its capital."
 - **Out of scope:** "Brasília is the capital of Brazil. Brazil isn't in Europe."
-- **Hints:** the capital is the answer here, so the first hint is **Country** (it names a country whose capital is missing) instead of Capital City; **First Letter** then spells out how that capital starts ("C _ _ _ _ _ _ _" for Canberra).
+- **Hints:** Starting Letters and Name Lengths count the missing capitals, not the countries (see Hints).
 - Measured: typing each of the 201 accepted capitals letter by letter in its own continent, none credits the wrong country and none is accepted before it's complete.
 
 ## Vexillology Mode (Flags)
@@ -190,7 +191,7 @@ One flag at a time, shown big as a clay tile, for one region (a continent, or al
 
 A round of the 10 countries you're worst at naming, picked from your own saved rounds each time the tab opens.
 
-- **Evidence per country:** every country-name list round (not capitals, flags or routes) with saved answers. An answer counts its time since the previous one (hinted or picked from the list: at least 30 s, as on the heatmap); a country asked for in a given-up round but never named is a miss, counted as 60 s. A country's weakness is its average over all of these.
+- **Evidence per country:** every country-name list round (not capitals, flags or routes) with saved answers. An answer counts its time since the previous one (picked from the list, or hinted in an older round: at least 30 s); a country asked for in a given-up round but never named is a miss, counted as 60 s. A country's weakness is its average over all of these.
 - **The round:** the 10 weakest; with fewer than 10 countries of evidence, the rest at random, from countries you haven't been asked for yet. The tab says how many came from your profile.
 - **Play:** name the 10 countries shown in white on the map, which zooms to fit them (across the 180° line for Pacific islands). The usual hints work. Your answers are saved like any round's, so the list changes as you improve; **New Weak Spots round** picks again.
 - Round records now carry the countries asked for (`targets`), so a Weak Spots round's misses count too. Older records are matched to their round by key.
@@ -314,9 +315,9 @@ The map only answers taps when that can't be used to cheat:
 
 ## Recall heatmap
 
-Each list round (flag rounds aside) saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint was about it (Capital City or First Letter), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
+Each list round (flag rounds aside) saves every correct answer with the time since the previous one (`answers` in the round record), whether a hint pointed at it (only single-country hints do: a flag's own hints, or Capital City and First Letter in rounds saved before the tallies; flag rounds aren't mapped anyway), and whether it was picked from the suggestion list. The profile maps each country's average onto the world map:
 
-- Bands: under 4 s (green), 4–10 s, 10–20 s, over 20 s (red), blank for never named. A hinted answer counts as at least 30 s, so heavily hinted countries go red. Picked answers are recognition, not recall, and don't count. Countries and capitals are mapped separately.
+- Bands: under 4 s (green), 4–10 s, 10–20 s, over 20 s (red), blank for never named. A hinted answer (older rounds only, see above) counts as at least 30 s. Picked answers are recognition, not recall, and don't count. Countries and capitals are mapped separately.
 - Green to red as asked, with lightness falling at every step, so the order still reads for red-green color-blind players and in grayscale (checked with the dataviz palette validator; it only objects that the ramp isn't one hue, which green to red can't be).
 - Each country has a tooltip, and the legend counts each band. The 5 slowest and 5 fastest are listed with their times, so nothing depends on color alone.
 - Rounds saved before this phase have no answer data and don't appear.
@@ -344,12 +345,12 @@ Each finished or forfeited round is saved once, after the Timer reports the fina
 
 ## Hints (2 per round, given in order)
 
-List rounds (continents, empires, World) get two text hints; nothing is marked on the map.
+List rounds (continents, empires, World, Weak Spots, Daily Guessing) get two text hints. Neither is about one country: both are tallies over every answer still missing, recounted after each correct answer, so they shrink as you go. Nothing is marked on the map.
 
-1. **Capital City:** the capital of one missing country, picked at random ("One missing country has the capital Nairobi."). Countries with no capital on record are skipped.
-2. **First Letter:** the first letter and a blank per letter ("K _ _ _ _"), spaces and hyphens kept. It's about the same country as Capital City while that one is still missing, so the two build on each other; once it's found, another missing country at random. Screen readers hear "starts with K, 5 letters" instead of the underscores.
+1. **Starting Letters:** how many missing countries start with each letter, most common first, ties A to Z ("Remaining starting letters: M (3), C (1), T (1)"). Accents fold into their letter: Türkiye counts under T.
+2. **Name Lengths:** how many missing countries have each name length, shortest first ("Remaining name lengths: 4 letters (1), 8 letters (2)"). Only letters count: Guinea-Bissau has 12, Sri Lanka 8.
 
-Each hint says "Found: Kenya." once its country is named. The result line reports hints used. In Capitals mode the first hint is **Country** instead (see Capitals mode). Pathfinding has its own two map hints (see Fog of war).
+Each count is a small clay chip; the chip whose count just changed springs back in, and a letter or length drops out when its last country is named. Screen readers hear a tally once, when it's given, not on every change (the answer feedback already speaks then). Both count **the names this game shows**: Ivory Coast is an I, Eswatini an E, Myanmar an M, Timor-Leste a T, DR Congo a D with 7 letters. In Capitals mode they count each missing country's displayed capital instead (Sri Lanka's is Sri Jayawardenepura Kotte, not Colombo). The tallies never mark an answer as hinted: they describe every missing country at once, not one, so answers keep their raw recall time for the heatmap and Weak Spots whether a tally is open or not. The result line reports hints used. Flags keep their own per-flag hints (see Vexillology Mode) and Pathfinding its two map hints (see Fog of war).
 
 ## Map
 

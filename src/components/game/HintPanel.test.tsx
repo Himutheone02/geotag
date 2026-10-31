@@ -2,13 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import snapshot from "@/data/countries.json";
-import { toSovereignStates, type RawCountry } from "@/data/loadCountries";
-import HintPanel, { letterCount, letterPattern, MAX_HINTS, pickHintTarget, type Hint } from "./HintPanel";
+import { startingLetters } from "@/utils/hintTally";
+import HintPanel, { HintTally, letterCount, letterPattern, MAX_HINTS, type Hint } from "./HintPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-const countries = toSovereignStates(snapshot as RawCountry[]);
 
 describe("letterPattern", () => {
   it.each([
@@ -36,17 +33,40 @@ describe("letterCount", () => {
   });
 });
 
-describe("pickHintTarget", () => {
-  const africa = countries.filter((c) => c.region === "Africa");
+describe("HintTally", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  const show = (names: string[]) =>
+    act(() => root.render(<HintTally label="Remaining starting letters" items={startingLetters(names)} />));
+  const chips = () => [...container.querySelectorAll(".hint-tally__item")];
 
-  it("picks a missing country at random", () => {
-    expect(pickHintTarget(africa, () => 0)).toBe(africa[0]);
-    expect(pickHintTarget(africa, () => 0.9999)).toBe(africa[africa.length - 1]);
-    expect(pickHintTarget(africa, () => 0.5)).toBe(africa[Math.floor(africa.length / 2)]);
+  it("reads as one line, with a chip per letter", () => {
+    show(["Malta", "Togo", "Mali", "Chad", "Mongolia"]);
+    expect(container.textContent).toBe("Remaining starting letters: M (3), C (1), T (1)");
+    expect(chips()).toHaveLength(3);
+    expect(container.querySelector(".hint-tally")!.getAttribute("aria-live")).toBe("off"); // count changes aren't announced
   });
 
-  it("returns null when nothing is missing", () => {
-    expect(pickHintTarget([])).toBeNull();
+  it("re-renders only the chip whose count changed (it springs back in), and drops a letter at zero", () => {
+    show(["Malta", "Togo", "Mali", "Mongolia", "Chad"]);
+    const [m, c, t] = chips();
+    show(["Malta", "Togo", "Mongolia", "Chad"]); // Mali named
+    const after = chips();
+    expect(container.textContent).toBe("Remaining starting letters: M (2), C (1), T (1)");
+    expect(after[0]).not.toBe(m); // M (2): a new node, so its pop-in plays
+    expect(after[1]).toBe(c);
+    expect(after[2]).toBe(t);
+    show(["Malta", "Mongolia", "Chad"]); // Togo named
+    expect(container.textContent).toBe("Remaining starting letters: M (2), C (1)");
   });
 });
 

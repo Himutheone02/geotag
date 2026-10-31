@@ -17,7 +17,8 @@ import DailyCard, { longDate, MidnightCountdown } from "@/components/game/DailyC
 import ArchiveDialog, { type ArchiveDay } from "@/components/game/ArchiveDialog";
 import PathfindingIntro from "@/components/game/PathfindingIntro";
 import Flag, { loadFlags, useFlags } from "@/components/game/Flag";
-import HintPanel, { letterCount, letterPattern, MAX_HINTS, pickHintTarget, type Hint } from "@/components/game/HintPanel";
+import HintPanel, { HintTally, letterCount, letterPattern, MAX_HINTS, type Hint } from "@/components/game/HintPanel";
+import { nameLengths, startingLetters } from "@/utils/hintTally";
 import MapTooltip from "@/components/game/MapTooltip";
 import ProfileDialog from "@/components/game/ProfileDialog";
 import ShareResult from "@/components/game/ShareResult";
@@ -937,21 +938,9 @@ export default function CountryGuesser({
       return;
     }
     if (!isPlaying || session.hintsUsed >= MAX_HINTS) return;
-    // Pathfinding hints are about the map, not a country: no target.
-    let target: string | null = null;
-    if (!isRoute) {
-      if (session.hintsUsed === 0) {
-        // Capital City: a missing country that has a capital (in Capitals rounds every one does).
-        const withCapital = missing.filter((c) => c.capitals.length > 0);
-        target = pickHintTarget(withCapital.length > 0 ? withCapital : missing)?.code ?? null;
-      } else {
-        // First Letter: the same country as the first hint while it's still missing, so the
-        // two hints build on each other; otherwise another missing country, at random.
-        const previous = session.hintTargets[0];
-        target = previous && !namedSet.has(previous) ? previous : (pickHintTarget(missing)?.code ?? null);
-      }
-    }
-    dispatch({ type: "hint", target });
+    // Pathfinding hints are about the map, and Guessing hints are tallies over every missing
+    // country: neither is about one country, so no target.
+    dispatch({ type: "hint", target: null });
     inputRef.current?.focus();
   }
 
@@ -1144,13 +1133,14 @@ export default function CountryGuesser({
       distance === 0
         ? `Recognized: ${what}`
         : `Recognized: ${what} (from "${typed}", ${distance} edit${distance === 1 ? "" : "s"} away)`;
-    // Hinted: a hint was about this country, or (Pathfinding) its borders were drawn by a hint.
-    const [stage1, stage2] = session.hintTargets;
+    // Hinted: a hint pointed at this one. Pathfinding: its borders were drawn by a hint. Flags:
+    // this flag's own hints. Guessing: never. Its tallies are about every missing country at once,
+    // so an answer keeps its raw recall time for the heatmap and Weak Spots, tallies open or not.
     const hinted = isRoute
       ? session.hintsUsed >= 2 || (session.hintsUsed >= 1 && routeScope.has(country.code))
       : isFlags
-        ? session.flagHints > 0 // this flag's own hints
-        : (session.hintsUsed >= 1 && stage1 === country.code) || (session.hintsUsed >= 2 && stage2 === country.code);
+        ? session.flagHints > 0
+        : false;
     const guess: Guess = { country, typed, distance, label, at: Date.now() - startedAt.current, hinted, picked };
     if (isRoute && route) {
       const complete = routeComplete(graph, route, [...guessedCodes, country.code]);
@@ -1483,60 +1473,14 @@ export default function CountryGuesser({
         { name: "Reveal All", shown: "The fog is lifted: every border is drawn." },
       ];
     }
-    const [firstCode, secondCode] = session.hintTargets;
-    const first = firstCode ? index.byCode.get(firstCode) : undefined;
-    const second = secondCode ? index.byCode.get(secondCode) : undefined;
-    const found = (c: Country) =>
-      namedSet.has(c.code) ? <span className="hint-found"> Found{isCapitals ? `: ${answerLabel(capitalIndex, c.code)}` : `: ${c.name}`}.</span> : null;
-    const capitalHint: Hint = isCapitals
-      ? {
-          // In Capitals rounds the capital is the answer: this hint names the country instead.
-          name: "Country",
-          shown: first ? (
-            <>
-              One capital left to name is the capital of <strong>{first.name}</strong>.{found(first)}
-            </>
-          ) : (
-            "Nothing left to hint at."
-          ),
-        }
-      : {
-          name: "Capital City",
-          shown: first ? (
-            <>
-              One missing country has the capital{first.capitals.length > 1 ? "s" : ""}{" "}
-              <strong>{first.capitals.length > 0 ? first.capitals.join(", ") : "(none on record)"}</strong>.{found(first)}
-            </>
-          ) : (
-            "Nothing left to hint at."
-          ),
-        };
-    const word = second ? (isCapitals ? answerLabel(capitalIndex, second.code) : second.name) : "";
-    const letterHint: Hint = {
-      name: "First Letter",
-      shown: second ? (
-        <>
-          {second.code === firstCode
-            ? isCapitals
-              ? `The capital of ${second.name}: `
-              : "That country: "
-            : isCapitals
-              ? "A capital you're missing: "
-              : "A missing country: "}
-          <span className="letter-pattern" aria-hidden="true">
-            {letterPattern(word)}
-          </span>
-          <span className="visually-hidden">
-            starts with {word.trim()[0]?.toUpperCase()}, {letterCount(word)} letters
-          </span>
-          {found(second)}
-        </>
-      ) : (
-        "Nothing left to hint at."
-      ),
-    };
-    return [capitalHint, letterHint];
-  }, [isRoute, isFlags, currentFlag, isCapitals, session.hintTargets, index, namedSet, capitalIndex]);
+    // Guessing: two tallies over every answer still missing (in Capitals rounds, the capitals
+    // as this game shows them). Recomputed from `missing`, so they shrink with every answer.
+    const remaining = missing.map((c) => (isCapitals ? answerLabel(capitalIndex, c.code) : c.name));
+    return [
+      { name: "Starting Letters", shown: <HintTally label="Remaining starting letters" items={startingLetters(remaining)} /> },
+      { name: "Name Lengths", shown: <HintTally label="Remaining name lengths" items={nameLengths(remaining)} /> },
+    ];
+  }, [isRoute, isFlags, currentFlag, isCapitals, index, missing, capitalIndex]);
   // Chips take the round's color; in World Mode each takes its own continent's.
   const chipRegion = (c: Country) => (current?.theme ? undefined : c.region);
 
@@ -2223,8 +2167,8 @@ export default function CountryGuesser({
               : isFlags
                 ? "Two hints for each flag: Capital City gives the country's capital; First Letter spells out how its name starts."
                 : isCapitals
-                ? "Capital City names a country whose capital you're missing; First Letter spells out how its capital starts."
-                : "Capital City gives you the capital of a country you're missing; First Letter spells out how its name starts."
+                  ? "Starting Letters counts the first letters of the capitals you're missing; Name Lengths counts how many letters each has. Both update as you name them."
+                  : "Starting Letters counts the first letters of the countries you're missing; Name Lengths counts how many letters each has. Both update as you name them."
           }
           available={isRoute || (isFlags ? currentFlag !== null : missing.length > 0)}
           onRequest={requestHint}

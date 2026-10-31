@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import ClayButton from "@/components/ui/ClayButton";
 import ClayCard from "@/components/ui/ClayCard";
-import type { Country } from "@/utils/fuzzyMatch";
+import type { TallyItem } from "@/utils/hintTally";
+
+export { letterCount } from "@/utils/hintTally";
 
 /** Two hints per round, used in order. */
 export const MAX_HINTS = 2;
@@ -9,12 +11,6 @@ export const MAX_HINTS = 2;
 /* ------------------------------------------------------------------ */
 /* Hint logic (pure)                                                   */
 /* ------------------------------------------------------------------ */
-
-/** A missing country, chosen at random, for a hint to be about. Null when nothing is missing. */
-export function pickHintTarget(missing: readonly Country[], random: () => number = Math.random): Country | null {
-  if (missing.length === 0) return null;
-  return missing[Math.floor(random() * missing.length)] ?? missing[0];
-}
 
 /**
  * The first letter and a blank for every other letter: "Brazil" -> "B _ _ _ _ _".
@@ -40,21 +36,44 @@ export function letterPattern(name: string): string {
     .join("   ");
 }
 
-/** How many letters a name has (spaces, hyphens and apostrophes don't count). */
-export function letterCount(name: string): number {
-  return [...name].filter((ch) => /\p{L}/u.test(ch)).length;
-}
-
 /* ------------------------------------------------------------------ */
-/* Component                                                           */
+/* Components                                                          */
 /* ------------------------------------------------------------------ */
 
 export type Hint = {
-  /** What the hint is called: "Capital City", "First Letter", "Reveal Adjacent"... */
+  /** What the hint is called: "Starting Letters", "Capital City", "Reveal Adjacent"... */
   name: string;
   /** What it shows once used. */
   shown: ReactNode;
 };
+
+type HintTallyProps = {
+  /** "Remaining starting letters" */
+  label: string;
+  items: readonly TallyItem[];
+};
+
+/**
+ * A live tally, "Remaining starting letters: M (3), C (1), T (1)", as a row of small clay
+ * chips. A chip is keyed by its count too, so the one that just changed springs back in.
+ * It isn't a live region of its own: the whole tally is read out once, when the hint is
+ * given, and the answer feedback already speaks on every guess.
+ */
+export function HintTally({ label, items }: HintTallyProps) {
+  return (
+    <>
+      <span className="hint-tally__label">{label}:</span>{" "}
+      <ul className="hint-tally" aria-live="off">
+        {items.map((item, i) => (
+          <li key={`${item.key}:${item.count}`} className="hint-tally__item">
+            {item.text}
+            {i < items.length - 1 && <span className="visually-hidden">, </span>}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
 
 type HintPanelProps = {
   /** Hints used so far this round. */
@@ -85,11 +104,12 @@ export default function HintPanel({ used, hints, lead, available = true, onReque
       {used === 0 ? (
         <p className="card-lead">{lead}</p>
       ) : (
-        <ol className="hint-list" aria-live="polite">
+        // New hints are announced; a tally's counts changing inside one isn't.
+        <ol className="hint-list" aria-live="polite" aria-relevant="additions">
           {hints.slice(0, used).map((hint) => (
             <li key={hint.name} className="hint">
               <span className="hint-name">{hint.name}</span>
-              <span className="hint-text">{hint.shown}</span>
+              <div className="hint-text">{hint.shown}</div>
             </li>
           ))}
         </ol>

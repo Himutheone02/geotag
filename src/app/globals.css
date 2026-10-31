@@ -2705,9 +2705,31 @@ html[data-challenge="pending"] .setup-only {
   transform-origin: left center;
 }
 
-.hint-found {
-  color: var(--tone-ok);
+/* Starting Letters / Name Lengths: a wrap of small raised clay chips. A chip remounts when its
+   count changes, so it springs back in and the eye catches what the last answer took away. */
+.hint-tally__label {
   font-weight: 500;
+}
+
+.hint-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hint-tally__item {
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--clay-surface-bright);
+  box-shadow: var(--clay-shadow-sm);
+  font-size: var(--step--1);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: clay-pop-in var(--spring-snappy-duration) var(--spring-snappy) both;
 }
 
 .hint-name {
@@ -3634,6 +3656,7 @@ html[data-challenge="pending"] .setup-only {
   }
 
   .hint,
+  .hint-tally__item,
   .map-named--popping,
   .map-marker--named,
   .map-marker--missed,

@@ -14,7 +14,8 @@ import CountryGuesser, {
 } from "./CountryGuesser";
 import { flagSrc, loadFlags } from "@/components/game/Flag";
 import { FLAGS } from "@/data/flags";
-import { letterCount, letterPattern } from "@/components/game/HintPanel";
+import { letterPattern } from "@/components/game/HintPanel";
+import { nameLengths, startingLetters, tallyText } from "@/utils/hintTally";
 import { buildBorderGraph, detourOf, pickRoute, routeComplete, routeFrontier, routeVerdict } from "@/utils/pathfinding";
 import { ARCHIVE_START, archiveDates, dailyGuessing, dailyPathfinding, dateKey } from "@/utils/dailySeed";
 import { isLocalOnly, QR_EXIT_MS } from "@/components/game/QrShareModal";
@@ -247,61 +248,71 @@ const hintButton = () => $<HTMLButtonElement>(".hint-card button");
 /** What each hint given so far says (without its name). */
 const hints = () => [...container.querySelectorAll(".hint-list > .hint .hint-text")].map((t) => t.textContent?.trim() ?? "");
 const byCode = new Map(countries.map((c) => [c.code, c]));
-/** The country a Capital City hint is about, found from the capital it gives. */
-const capitalHintCountry = (text: string, pool = countries) =>
-  pool.find((c) => c.capitals.length > 0 && text.includes(` ${c.capitals.join(", ")}.`))!;
+/** The chips of hint n (0 = Starting Letters, 1 = Name Lengths). */
+const tallyChips = (n: number) =>
+  [...container.querySelectorAll(".hint-list > .hint")][n]?.querySelectorAll(".hint-tally__item") ?? [];
+const chipTexts = (n: number) => [...tallyChips(n)].map((c) => c.textContent!.replace(/,\s*$/, ""));
 
 describe("hints", () => {
   const europe = inRegion("Europe");
-  beforeEach(() => {
-    vi.spyOn(Math, "random").mockReturnValue(0);
-    clickButton("Europe");
-  });
-  afterEach(() => vi.restoreAllMocks());
+  const lettersOf = (names: string[]) => tallyText(startingLetters(names));
+  const lengthsOf = (names: string[]) => tallyText(nameLengths(names));
+  beforeEach(() => clickButton("Europe"));
 
-  it("offers two hints, Capital City then First Letter", () => {
-    expect(hintButton()!.textContent).toBe("Capital City (0/2)");
+  it("offers two hints, Starting Letters then Name Lengths", () => {
+    expect(hintButton()!.textContent).toBe("Starting Letters (0/2)");
     expect(hints()).toEqual([]);
-    expect($(".hint-card .card-lead")!.textContent).toContain("Capital City gives you the capital of a country you're missing");
+    expect($(".hint-card .card-lead")!.textContent).toBe(
+      "Starting Letters counts the first letters of the countries you're missing; Name Lengths counts how many letters each has. Both update as you name them.",
+    );
   });
 
-  it("Capital City gives the capital of a missing country; First Letter spells out that country", () => {
-    clickButton("Capital City");
-    expect(hintButton()!.textContent).toBe("First Letter (1/2)");
-    expect(hints()[0]).toMatch(/^One missing country has the capitals? .+\.$/);
-    const target = capitalHintCountry(hints()[0], europe);
-    expect(target).toBeDefined();
-    clickButton("First Letter");
-    const pattern = $(".letter-pattern")!;
-    expect(pattern.textContent).toBe(letterPattern(target.name));
-    expect(pattern.getAttribute("aria-hidden")).toBe("true");
-    expect(hints()[1]).toContain(`That country: ${letterPattern(target.name)}`);
-    expect(hints()[1]).toContain(`starts with ${target.name[0]}, ${letterCount(target.name)} letters`); // for screen readers
+  it("Starting Letters tallies the first letters of every missing country; Name Lengths, their letter counts", () => {
+    const names = europe.map((c) => c.name);
+    clickButton("Starting Letters");
+    expect(hintButton()!.textContent).toBe("Name Lengths (1/2)");
+    expect(hints()[0]).toBe(`Remaining starting letters: ${lettersOf(names)}`);
+    expect(chipTexts(0)).toEqual(startingLetters(names).map((t) => t.text));
+    // Most common first: Europe has more countries starting with S than with anything else.
+    expect(chipTexts(0)[0]).toMatch(/^S \(\d+\)$/);
+    clickButton("Name Lengths");
+    expect(hints()[1]).toBe(`Remaining name lengths: ${lengthsOf(names)}`);
+    expect(chipTexts(1)[0]).toMatch(/^5 letters \(\d+\)$/); // Italy, Malta, Spain... shortest first
     expect(hintButton()!.textContent).toBe("No hints left (2/2)");
     expect(hintButton()!.disabled).toBe(true);
   });
 
-  it("says when the hinted country is found, and First Letter then moves to another missing country", () => {
-    clickButton("Capital City");
-    const target = capitalHintCountry(hints()[0], europe);
-    typeKeys(target.name);
-    if (input().value) pressEnter(); // a name that starts another country's waits for Enter
-    expect(hints()[0]).toContain(`Found: ${target.name}.`);
-    clickButton("First Letter");
-    expect(hints()[1]).toMatch(/^A missing country: /); // not "That country": it's already found
+  it("both tallies shrink as countries are named, and a letter drops out once its last country is named", () => {
+    clickButton("Starting Letters");
+    clickButton("Name Lengths");
+    const ms = europe.filter((c) => c.name.startsWith("M")).map((c) => c.name);
+    expect(ms.length).toBeGreaterThan(1);
+    expect(chipTexts(0)).toContain(`M (${ms.length})`);
+    const named: string[] = [];
+    for (const name of ms) {
+      typeKeys(name);
+      if (input().value) pressEnter(); // a name that starts another country's waits for Enter
+      named.push(name);
+      const left = europe.map((c) => c.name).filter((n) => !named.includes(n));
+      expect(hints()[0]).toBe(`Remaining starting letters: ${lettersOf(left)}`);
+      expect(hints()[1]).toBe(`Remaining name lengths: ${lengthsOf(left)}`);
+    }
+    expect(chipTexts(0).some((t) => t.startsWith("M "))).toBe(false);
   });
 
-  it("never marks the map during a round: no hint layer, no tappable countries", async () => {
+  it("never names an answer, and never marks the map", async () => {
     await loadMap();
-    clickButton("Capital City");
-    clickButton("First Letter");
+    clickButton("Starting Letters");
+    clickButton("Name Lengths");
+    const text = $(".hint-card")!.textContent!;
+    expect(europe.filter((c) => text.includes(c.name))).toEqual([]);
     expect($(".map-hint, .map-revealed")).toBeNull();
     expect($(".world-map")!.hasAttribute("data-interactive")).toBe(false);
     expect($(".world-map")!.hasAttribute("data-fog")).toBe(false); // fog is Pathfinding only
   });
 
   it("reports hints used in the result", () => {
-    clickButton("Capital City");
+    clickButton("Starting Letters");
     clickButton("Forfeit");
     expect($(".card-lead")!.textContent).toBe("You forfeited at 00:00, with 1 hint. Here are the 45 you missed.");
   });
@@ -802,18 +813,22 @@ describe("Capitals mode", () => {
     ]);
   });
 
-  it("hints name a country whose capital is missing, then spell out how that capital starts", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0);
+  it("hints tally the capitals still missing, not the countries, and never name one", () => {
     clickButton("Oceania");
-    // The capital is the answer here, so the first hint can't be "Capital City".
-    expect(hintButton()!.textContent).toBe("Country (0/2)");
-    clickButton("Country");
-    expect(hints()[0]).toMatch(/^One capital left to name is the capital of .+\.$/);
-    const country = inRegion("Oceania").find((c) => hints()[0].includes(`the capital of ${c.name}.`))!;
-    clickButton("First Letter");
-    expect(hints()[1]).toContain(`The capital of ${country.name}: ${letterPattern(country.capitals[0])}`);
-    expect($(".hint-card")!.textContent).not.toContain(country.capitals[0]); // never the answer itself
-    vi.restoreAllMocks();
+    const oceania = inRegion("Oceania");
+    const capitals = oceania.map((c) => c.capitals[0]); // one capital each in Oceania
+    expect($(".hint-card .card-lead")!.textContent).toMatch(/^Starting Letters counts the first letters of the capitals you're missing/);
+    clickButton("Starting Letters");
+    clickButton("Name Lengths");
+    expect(hints()[0]).toBe(`Remaining starting letters: ${tallyText(startingLetters(capitals))}`);
+    expect(hints()[1]).toBe(`Remaining name lengths: ${tallyText(nameLengths(capitals))}`);
+    typeKeys("Canberra");
+    if (input().value) pressEnter();
+    const left = capitals.filter((c) => c !== "Canberra");
+    expect(hints()[0]).toBe(`Remaining starting letters: ${tallyText(startingLetters(left))}`);
+    expect(hints()[1]).toBe(`Remaining name lengths: ${tallyText(nameLengths(left))}`);
+    const text = $(".hint-card")!.textContent!;
+    expect(capitals.filter((c) => text.includes(c))).toEqual([]);
   });
 
   it("lists missed capitals with their countries after a forfeit, and replays in Capitals mode", () => {
@@ -1279,8 +1294,8 @@ describe("map taps", () => {
   it("is inert during a list round, hints or not: taps never give an answer away", async () => {
     clickButton("Oceania");
     await loadMap();
-    clickButton("Capital City");
-    clickButton("First Letter");
+    clickButton("Starting Letters");
+    clickButton("Name Lengths");
     expect(container.querySelector(".world-map [data-clickable]")).toBeNull();
     tapMap("PNG");
     expect(tooltip()).toBeNull();

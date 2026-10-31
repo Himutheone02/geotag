@@ -415,8 +415,9 @@ function RecallHeatmap({ rounds, countries }: { rounds: readonly RoundRecord[]; 
       </h3>
       <p className="profile-note">
         How long each country takes you to come up with, from your previous answer, averaged over your continent,
-        empire and World rounds. A hinted answer counts as at least {HINT_PENALTY_SECONDS} s; answers picked from the
-        suggestion list don&apos;t count.
+        empire and World rounds. The letter and length hints don&apos;t change an answer&apos;s time; answers picked from the
+        suggestion list don&apos;t count. (In rounds from before those hints, an answer a hint pointed at counts as at
+        least {HINT_PENALTY_SECONDS} s.)
       </p>
       {hasCapitals && (
         <div className="mode-switch heatmap-switch" role="group" aria-label="Which answers to map">
